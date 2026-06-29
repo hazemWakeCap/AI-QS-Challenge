@@ -11,9 +11,10 @@ Sheets included:
 
 The project's computed budget, earned-value, KPI and progress sheets are intentionally **not** included.
 
-## Data note — correction applied (28 Jun 2026)
-An earlier version had a costing error: in `4_ESTIMATE_DATASHEET`, manpower and equipment quantities were computed as `BOQ quantity × gang size` **without dividing by the operation's Output Norm** (units per gang-shift), which overstated labour/equipment — and the derived costs — on most line items.
+## Data note — current cost model (29 Jun 2026)
+This dataset is generated from the project's latest reconciled cost model. Two things worth knowing:
 
-This has been **corrected**: manpower/equipment resource quantities are now `BOQ quantity × (gang or equipment count ÷ Output Norm)`. Materials and subcontract (which scale with quantity, not shifts) were already correct and are unchanged. After the fix the model reconciles end to end — BOQ direct cost = estimate build-up, budgets recompute from the corrected direct cost, and all earned-value performance ratios (CPI/SPI) are preserved. Unit rates now sit in a realistic range.
+- **Estimate quantities.** In `4_ESTIMATE_DATASHEET`, manpower and equipment resource quantities are computed as `BOQ quantity × (gang or equipment count ÷ Output Norm)` (units produced per gang-shift) — **not** `BOQ quantity × gang size`. An earlier draft omitted the Output Norm divisor, which overstated labour/equipment and the costs derived from them; that has been corrected. Materials and subcontract scale with quantity (not shifts) and are unchanged.
+- **Pricing.** Direct cost flows from the estimate build-up into the BOQ, which adds margin and contingency to reach the contract total. The model reconciles end to end: BOQ direct cost = estimate build-up, and the contract amounts in `4_ESTIMATE_DATASHEET` roll up to the BOQ totals. Unit rates sit in a realistic range.
 
-> This correction was made by the organising team and is pending final sign-off from the cost-control lead. As with any real project data, validate figures you depend on.
+> This data was prepared and reconciled by the organising team. As with any real project data, validate figures you depend on.
