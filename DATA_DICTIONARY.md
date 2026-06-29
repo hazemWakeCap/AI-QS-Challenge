@@ -65,7 +65,7 @@ The detailed estimate — each BOQ item exploded into its resource lines, with r
 | Column | Meaning |
 |--------|---------|
 | BOQ Sec / Item / Description / Unit | The BOQ line |
-| BOQ Qty / BOQ UP / BOQ Amt | Quantity, unit price, amount from the BOQ |
+| BOQ Qty | Quantity from the BOQ |
 | Norm Code / Package / Op Code | Links to norm and package |
 | Resource Type | MANPOWER / MATERIAL / EQUIPMENT / SUBCONTRACT |
 | Resource Description | The specific resource |
@@ -75,7 +75,8 @@ The detailed estimate — each BOQ item exploded into its resource lines, with r
 | **Unit Rate (AED)** | Cost per resource unit (the rates live here) |
 | Resource Cost (AED) | Total Resource Qty × Unit Rate |
 | Indirect Cost (AED) | Allocated indirect cost |
-| Total Contract Amt (AED) | Rolls up to the BOQ amount |
+| Total Contract Amt (AED) | The item's contract value — rolls up to the BOQ TOTAL Amount (Sheet 1, col M) |
+| Contract Unit Price (AED) | Total Contract Amt ÷ BOQ Qty — the all-in contract price per unit |
 | Gang Output / Gang Size | From the norm |
 | Notes | Conditions |
 
