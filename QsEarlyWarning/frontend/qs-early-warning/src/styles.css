@@ -1,0 +1,79 @@
+:root {
+  --bg: #0f1420;
+  --surface: #171e2e;
+  --surface-2: #1e2740;
+  --border: #2a3652;
+  --text: #e7ecf5;
+  --muted: #8a97b1;
+  --accent: #4f8cff;
+  --hist: #b98900;
+  --forecast: #1f9d63;
+  --danger: #e2555a;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+
+.app { max-width: 1240px; margin: 0 auto; padding: 24px; }
+
+.topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+h1 { font-size: 22px; margin: 0 0 2px; }
+h2 { font-size: 15px; margin: 0 0 4px; }
+h3 { font-size: 13px; margin: 16px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; }
+
+.controls { display: flex; gap: 20px; margin: 18px 0; align-items: center; }
+.controls label { font-size: 13px; color: var(--muted); }
+select {
+  background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 10px; font-size: 13px;
+}
+
+.layout { display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start; }
+@media (max-width: 940px) { .layout { grid-template-columns: 1fr; } }
+
+.main { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; overflow-x: auto; }
+
+.watchlist-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.pill { font-size: 11px; font-weight: 700; letter-spacing: .05em; padding: 3px 9px; border-radius: 999px; }
+.pill-forecast { background: rgba(31,157,99,.16); color: var(--forecast); border: 1px solid rgba(31,157,99,.4); }
+.pill-hist { background: rgba(185,137,0,.16); color: var(--hist); border: 1px solid rgba(185,137,0,.4); }
+
+table.grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+.grid th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px;
+  text-transform: uppercase; letter-spacing: .04em; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.grid td { padding: 10px; border-bottom: 1px solid rgba(42,54,82,.5); vertical-align: top; }
+.grid tr:hover td { background: rgba(79,140,255,.05); }
+.num { text-align: right; }
+.rank { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.riskbar { position: relative; width: 92px; height: 18px; background: var(--surface-2);
+  border-radius: 5px; overflow: hidden; display: inline-block; }
+.riskbar-fill { position: absolute; inset: 0 auto 0 0; }
+.riskbar-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.4); }
+
+.indicators { display: flex; flex-wrap: wrap; gap: 5px; max-width: 340px; }
+.chip { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 2px 7px; font-size: 11.5px; color: var(--text); }
+
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+.badge-hist { display: inline-block; background: rgba(185,137,0,.14); color: var(--hist);
+  border: 1px solid rgba(185,137,0,.35); border-radius: 6px; padding: 3px 8px; font-size: 11px; margin: 0 0 12px; }
+
+.kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+.kpi { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.kpi-value { font-size: 20px; font-weight: 700; }
+.kpi-label { font-size: 11px; color: var(--muted); }
+.kpi-sub { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+
+table.mini { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.mini td { padding: 5px 8px; border-bottom: 1px solid rgba(42,54,82,.5); }
+.mini tr.hi td { color: var(--text); font-weight: 700; background: rgba(79,140,255,.08); }
+.mini .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.error { color: var(--danger); background: rgba(226,85,90,.08); border: 1px solid rgba(226,85,90,.3);
+  border-radius: 8px; padding: 12px; font-size: 13px; }
