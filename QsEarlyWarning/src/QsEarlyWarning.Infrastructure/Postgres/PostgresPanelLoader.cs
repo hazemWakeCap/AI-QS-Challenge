@@ -104,10 +104,12 @@ public sealed class PostgresPanelLoader : IProjectPanelSource, IAsyncDisposable
         await Exec(conn, tx, "SELECT set_config('app.current_project_id', @p, true)", ct,
             new NpgsqlParameter("p", NpgsqlDbType.Text) { Value = projectId.ToString() });
 
-        // RLS on qs.projects requires id = current_project AND membership — so this returns true only
-        // for a genuine member of the selected project. Same policy path as every data read.
-        await using var cmd = new NpgsqlCommand("SELECT EXISTS (SELECT 1 FROM qs.projects)", conn, tx);
-        var authorized = (bool)(await cmd.ExecuteScalarAsync(ct))!;
+        // Authorize the SELECTED project specifically via the same membership predicate every data
+        // policy uses. (Checking fn_is_member directly is robust even though projects now also has a
+        // permissive member-wide SELECT policy for the tenant switcher.)
+        await using var cmd = new NpgsqlCommand(
+            "SELECT qs.fn_is_member(nullif(current_setting('app.current_project_id', true), '')::bigint)", conn, tx);
+        var authorized = (await cmd.ExecuteScalarAsync(ct)) is true;
         await tx.RollbackAsync(ct);
         return authorized;
     }

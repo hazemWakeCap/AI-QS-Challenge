@@ -31,6 +31,9 @@ builder.Services.AddSingleton<IProjectPanelSource>(_ => new PostgresPanelLoader(
 builder.Services.AddSingleton<IProjectSnapshotRegistry>(sp =>
     new ProjectSnapshotRegistry(sp.GetRequiredService<IProjectPanelSource>()));
 builder.Services.AddSingleton(new ProjectResolver(connString));
+builder.Services.AddSingleton(new ProjectDirectory(connString));
+builder.Services.AddSingleton(new TenantWriteService(connString));
+builder.Services.AddSingleton(new QsEarlyWarning.Infrastructure.Crud.GenericCrudService(connString));
 builder.Services.AddScoped<TenantContext>();
 
 // S2 copilot: Microsoft Agent Framework over Claude, or a disabled agent when no key is set.

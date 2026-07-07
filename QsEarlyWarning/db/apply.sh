@@ -41,6 +41,8 @@ SET ROLE qs_owner;
 \i $MIG/0007_cost_ledger.sql
 \echo == 0008 estimate immutability ==
 \i $MIG/0008_estimate_immutability.sql
+\echo == 0009 dashboard ==
+\i $MIG/0009_dashboard.sql
 RESET ROLE;
 SQL
 
