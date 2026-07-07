@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type Health } from "./api/client";
 import { Watchlist } from "./components/Watchlist";
 import { ValidationPanel } from "./components/ValidationPanel";
+import { Copilot } from "./components/Copilot";
 
 // Retrospective origins 4..11 + the live forecast period 12.
 const PERIODS = [4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -56,7 +57,10 @@ export default function App() {
         <main className="main">
           <Watchlist period={period} k={k} />
         </main>
-        <ValidationPanel />
+        <div className="sidebar">
+          <ValidationPanel />
+          <Copilot />
+        </div>
       </div>
     </div>
   );

@@ -1,0 +1,162 @@
+using System.Text.RegularExpressions;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
+using QsEarlyWarning.Agent.Prompts;
+using QsEarlyWarning.Core.Agent;
+
+namespace QsEarlyWarning.Agent;
+
+/// <summary>
+/// Microsoft Agent Framework copilot backed by Anthropic Claude (plan §6.8), cloning the WakeCap
+/// ClaudeTrainingCenterAgent pattern: a ChatClientAgent over read-only QsAnalyticsTools, with
+/// tool-call tracking middleware for sanitized evidence, a pre-flight scope-rejection guard, and
+/// graceful tool-error handling. Implements the Core-owned IQsCostCopilotAgent so the model is
+/// swappable (Core carries no MAF dependency).
+/// </summary>
+public sealed class ClaudeQsCostCopilotAgent : IQsCostCopilotAgent
+{
+    private readonly IChatClient _chatClient;
+    private readonly QsAnalyticsTools _tools;
+    private readonly ILogger<ClaudeQsCostCopilotAgent> _logger;
+
+    private const int MaxHistoryTurns = 10;
+
+    // Pre-flight rejection for plainly off-topic asks (defence-in-depth; real enforcement is the
+    // read-only tool surface + per-tool arg validation).
+    private static readonly Regex OutOfScope = new(
+        @"\b(weather|joke|funny|riddle|recipe|cook(?:ing)?|poem|song|lyrics|story|stock price|" +
+        @"exchange rate|sports|movie|netflix|spotify|who won|president|capital of)\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    public ClaudeQsCostCopilotAgent(
+        IChatClient chatClient, QsAnalyticsTools tools, ILogger<ClaudeQsCostCopilotAgent> logger)
+    {
+        _chatClient = chatClient;
+        _tools = tools;
+        _logger = logger;
+    }
+
+    public async Task<CopilotAskResult> AskAsync(
+        string question, IReadOnlyList<CopilotTurn> history, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(question))
+            return CopilotAskResult.Text("Ask me about a cost centre or the watchlist.", refused: true);
+
+        if (OutOfScope.IsMatch(question))
+            return CopilotAskResult.Text(CopilotPrompts.OutOfScopeRefusal, refused: true);
+
+        var tracker = new ToolCallTracker();
+        var agent = BuildAgent(tracker);
+
+        var messages = BuildMessages(question, history);
+        // Note: newer Claude models reject the `temperature` parameter, so we don't set it.
+        var runOptions = new ChatClientAgentRunOptions(new ChatOptions());
+
+        try
+        {
+            var response = await agent.RunAsync(messages, session: null, options: runOptions, ct)
+                .ConfigureAwait(false);
+
+            var answer = response.Text ?? string.Empty;
+            return new CopilotAskResult
+            {
+                Answer = string.IsNullOrWhiteSpace(answer)
+                    ? "I couldn't find anything to report for that."
+                    : answer,
+                Evidence = tracker.Evidence,
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Copilot run failed.");
+            return CopilotAskResult.Text(
+                "The copilot is temporarily unavailable. The watchlist and validation views are unaffected.",
+                refused: true);
+        }
+    }
+
+    private AIAgent BuildAgent(ToolCallTracker tracker)
+    {
+        var aiTools = new List<AITool>
+        {
+            AIFunctionFactory.Create(_tools.GetWatchlist),
+            AIFunctionFactory.Create(_tools.GetCostCentreDetail),
+            AIFunctionFactory.Create(_tools.ExplainDrift),
+            AIFunctionFactory.Create(_tools.GetEvmSnapshot),
+        };
+
+        // Middleware: record each tool call for the sanitized evidence trail, and turn tool
+        // exceptions into a structured result the model can recover from (never 500 the run).
+        ValueTask<object?> ToolMiddleware(
+            AIAgent agent,
+            FunctionInvocationContext ctx,
+            Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>> next,
+            CancellationToken ct)
+        {
+            tracker.Record(ctx.Function.Name, ctx.Arguments);
+            return InvokeSafely(ctx, next, ct);
+        }
+
+        return new ChatClientAgent(
+                chatClient: _chatClient,
+                instructions: CopilotPrompts.System,
+                name: "QsCostCopilot",
+                description: "Read-only QS cost / EVM analytics agent.",
+                tools: aiTools)
+            .AsBuilder()
+            .Use((Func<AIAgent, FunctionInvocationContext,
+                Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>,
+                CancellationToken, ValueTask<object?>>)ToolMiddleware)
+            .Build();
+    }
+
+    private static async ValueTask<object?> InvokeSafely(
+        FunctionInvocationContext ctx,
+        Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>> next,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await next(ctx, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return new { error = $"tool '{ctx.Function.Name}' failed: {ex.Message}" };
+        }
+    }
+
+    private static List<ChatMessage> BuildMessages(string question, IReadOnlyList<CopilotTurn> history)
+    {
+        var messages = new List<ChatMessage>();
+        foreach (var turn in history.TakeLast(MaxHistoryTurns))
+        {
+            var role = string.Equals(turn.Role, "assistant", StringComparison.OrdinalIgnoreCase)
+                ? ChatRole.Assistant
+                : ChatRole.User;
+            if (!string.IsNullOrWhiteSpace(turn.Text))
+                messages.Add(new ChatMessage(role, turn.Text));
+        }
+        messages.Add(new ChatMessage(ChatRole.User, question));
+        return messages;
+    }
+
+    /// <summary>Records tool calls into a sanitized evidence trail (no raw framework objects).</summary>
+    private sealed class ToolCallTracker
+    {
+        private readonly List<CopilotEvidence> _evidence = new();
+        public IReadOnlyList<CopilotEvidence> Evidence => _evidence;
+
+        public void Record(string tool, IDictionary<string, object?>? args)
+        {
+            var detail = args is null || args.Count == 0
+                ? ""
+                : string.Join(", ", args.Select(kv => $"{kv.Key}={kv.Value}"));
+            _evidence.Add(new CopilotEvidence(tool, detail));
+        }
+    }
+}

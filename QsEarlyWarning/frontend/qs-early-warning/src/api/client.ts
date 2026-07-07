@@ -56,6 +56,22 @@ export interface ValidationSummary {
   cpiNative: ScorerReport[];
 }
 
+export interface CopilotEvidence {
+  tool: string;
+  detail: string;
+}
+
+export interface CopilotAskResponse {
+  answer: string;
+  refused: boolean;
+  evidence: CopilotEvidence[];
+}
+
+export interface CopilotTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
 export interface Health {
   status: string;
   workbook: string;
@@ -77,4 +93,13 @@ export const api = {
   watchlist: (period: number, k: number) =>
     get<WatchlistResponse>(`/api/v1/watchlist?period=${period}&k=${k}`),
   validationSummary: () => get<ValidationSummary>("/api/v1/validation-summary"),
+  askCopilot: async (question: string, history: CopilotTurn[]): Promise<CopilotAskResponse> => {
+    const res = await fetch("/api/v1/copilot/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, history }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    return (await res.json()) as CopilotAskResponse;
+  },
 };

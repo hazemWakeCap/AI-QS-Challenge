@@ -7,6 +7,10 @@ obj/
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
+
+# Local dev secrets — holds the real Anthropic key; must stay out of git
+**/appsettings.Development.json
 
 # OS / editor
 .DS_Store

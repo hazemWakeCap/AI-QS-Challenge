@@ -4,6 +4,7 @@
     <ProjectReference Include="..\QsEarlyWarning.Core\QsEarlyWarning.Core.csproj" />
     <ProjectReference Include="..\QsEarlyWarning.Infrastructure\QsEarlyWarning.Infrastructure.csproj" />
     <ProjectReference Include="..\QsEarlyWarning.Domain\QsEarlyWarning.Domain.csproj" />
+    <ProjectReference Include="..\QsEarlyWarning.Agent\QsEarlyWarning.Agent.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -1,3 +1,4 @@
+using QsEarlyWarning.Agent;
 using QsEarlyWarning.Core;
 using QsEarlyWarning.Core.Scoring;
 using QsEarlyWarning.Infrastructure.Excel;
@@ -18,6 +19,9 @@ builder.Services.AddSingleton<WatchlistScoringService>();
 // Load + train once at startup (fails loud if the workbook is invalid).
 builder.Services.AddSingleton<IModelProvider>(sp =>
     new ModelProvider(sp.GetRequiredService<IPanelLoader>(), workbookPath));
+
+// S2 copilot: Microsoft Agent Framework over Claude, or a disabled agent when no key is set.
+builder.Services.AddQsCostCopilot(builder.Configuration);
 
 var app = builder.Build();
 

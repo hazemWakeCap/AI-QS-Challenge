@@ -43,6 +43,15 @@ public sealed record ValidationSummaryDto(
     IReadOnlyList<ScorerReportDto> Rule,
     IReadOnlyList<ScorerReportDto> CpiNative);
 
+public sealed record CopilotTurnDto(string Role, string Text);
+
+public sealed record CopilotAskRequest(string Question, IReadOnlyList<CopilotTurnDto>? History);
+
+public sealed record CopilotEvidenceDto(string Tool, string Detail);
+
+public sealed record CopilotAskResponse(
+    string Answer, bool Refused, IReadOnlyList<CopilotEvidenceDto> Evidence);
+
 public sealed record HealthDto(
     string Status,
     string Workbook,
