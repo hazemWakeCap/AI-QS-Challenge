@@ -146,6 +146,14 @@ table.mini { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .ok-msg { color: var(--forecast); background: rgba(31,157,99,.1); border: 1px solid rgba(31,157,99,.3);
   border-radius: 8px; padding: 9px 12px; font-size: 13px; margin-top: 12px; }
 
+/* idea-3 stress-test assumption heatmap */
+.heat { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+.heat-cell { border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; min-width: 132px; }
+.heat-medium { background: rgba(185,137,0,.14); border-color: rgba(185,137,0,.4); }
+.heat-high { background: rgba(226,85,90,.14); border-color: rgba(226,85,90,.45); }
+.heat-pkg { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; font-weight: 700; }
+.heat-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
 /* forecast cost cone */
 .cone { display: block; max-width: 100%; }
 .cone-band { fill: rgba(79,140,255,.18); stroke: none; }

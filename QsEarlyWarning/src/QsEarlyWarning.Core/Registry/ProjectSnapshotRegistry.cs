@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using QsEarlyWarning.Core.Evaluation;
 using QsEarlyWarning.Core.Forecasting;
+using QsEarlyWarning.Core.StressTest;
 using QsEarlyWarning.Domain.Entities;
+using QsEarlyWarning.Domain.Estimate;
 using QsEarlyWarning.Infrastructure.Postgres;
 
 namespace QsEarlyWarning.Core.Registry;
@@ -25,6 +27,9 @@ public sealed record ProjectSnapshot
     /// snapshot Build() and refreshed via RebuildAsync — the registry has no change detection.</summary>
     public IncrementalSpendForecaster? Forecaster { get; init; }
     public ForecastValidationSummary? ForecastBacktest { get; init; }
+    /// <summary>Idea-3 Estimate Assumption Stress Test (null unless this is the estimate's owning project,
+    /// or if the workbook is unavailable). Built at snapshot Build() from the workbook + this panel.</summary>
+    public StressTestReport? StressTest { get; init; }
 
     public int RowCount => Panel.Count;
     public int CentreCount => Panel.Select(p => p.BccId).Distinct(StringComparer.Ordinal).Count();
@@ -52,10 +57,15 @@ public interface IProjectSnapshotRegistry
 public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
 {
     private readonly IProjectPanelSource _source;
+    private readonly IEstimateSource? _estimate;
     private readonly ConcurrentDictionary<long, ProjectSnapshot> _cache = new();
     private readonly ConcurrentDictionary<long, SemaphoreSlim> _locks = new();
 
-    public ProjectSnapshotRegistry(IProjectPanelSource source) => _source = source;
+    public ProjectSnapshotRegistry(IProjectPanelSource source, IEstimateSource? estimate = null)
+    {
+        _source = source;
+        _estimate = estimate;
+    }
 
     public ProjectSnapshot? TryGet(long projectId) => _cache.TryGetValue(projectId, out var s) ? s : null;
 
@@ -118,6 +128,17 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
         }
         catch { /* forecaster unavailable for this project; leave null */ }
 
+        // Idea-3 stress test: only the estimate's owning project returns a model (gated by project id);
+        // Class 1+2 use the workbook, Class 3 uses this panel. Degrade gracefully like the forecaster.
+        StressTestReport? stressTest = null;
+        try
+        {
+            var estimate = _estimate?.TryLoadForProject(projectId);
+            if (estimate is not null)
+                stressTest = new EstimateStressTester().Run(estimate, panel);
+        }
+        catch { /* stress test unavailable for this project; leave null */ }
+
         return new ProjectSnapshot
         {
             ProjectId = projectId,
@@ -129,6 +150,7 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
             BuiltAtUtc = DateTimeOffset.UtcNow,
             Forecaster = forecaster,
             ForecastBacktest = backtest,
+            StressTest = stressTest,
         };
     }
 }

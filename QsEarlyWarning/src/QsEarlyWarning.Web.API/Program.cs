@@ -2,6 +2,7 @@ using QsEarlyWarning.Agent;
 using QsEarlyWarning.Core;
 using QsEarlyWarning.Core.Registry;
 using QsEarlyWarning.Core.Scoring;
+using QsEarlyWarning.Domain.Estimate;
 using QsEarlyWarning.Infrastructure.Excel;
 using QsEarlyWarning.Infrastructure.Postgres;
 using QsEarlyWarning.Web.API.Tenancy;
@@ -28,9 +29,20 @@ builder.Services.AddSingleton<IModelProvider>(sp =>
 var connString = builder.Configuration.GetConnectionString("Qs")
     ?? $"Host=localhost;Port=5432;Database=qs_phase1;Username={Environment.UserName}";
 builder.Services.AddSingleton<IProjectPanelSource>(_ => new PostgresPanelLoader(connString));
-builder.Services.AddSingleton<IProjectSnapshotRegistry>(sp =>
-    new ProjectSnapshotRegistry(sp.GetRequiredService<IProjectPanelSource>()));
 builder.Services.AddSingleton(new ProjectResolver(connString));
+
+// Idea-3 estimate source: bound to the workbook's owning project (Tower X). Resolve the owning id ONCE
+// at startup via the bypass-role resolver; fail closed to null (stress test simply unavailable) if the
+// DB is down or the slug is unknown. The workbook is read lazily + memoized on first use.
+var estimateSlug = builder.Configuration["Data:EstimateProjectSlug"] ?? "tower-x";
+long? owningProjectId = null;
+try { owningProjectId = new ProjectResolver(connString).ResolveAsync(estimateSlug).GetAwaiter().GetResult(); }
+catch { /* DB unavailable at startup → stress test disabled */ }
+builder.Services.AddSingleton<IEstimateSource>(new EstimateWorkbookLoader(workbookPath, owningProjectId));
+
+builder.Services.AddSingleton<IProjectSnapshotRegistry>(sp =>
+    new ProjectSnapshotRegistry(sp.GetRequiredService<IProjectPanelSource>(),
+        sp.GetRequiredService<IEstimateSource>()));
 builder.Services.AddSingleton(new ProjectDirectory(connString));
 builder.Services.AddSingleton(new TenantWriteService(connString));
 builder.Services.AddSingleton(new QsEarlyWarning.Infrastructure.Crud.GenericCrudService(connString));

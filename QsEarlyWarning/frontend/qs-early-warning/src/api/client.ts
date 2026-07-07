@@ -58,6 +58,15 @@ export interface CentreForecast { bccId: string; originPeriod: number; progressP
 export interface ProjectSpendScenario { originPeriod: number; p10: number; p50: number; p90: number; centres: number; draws: number; }
 export interface HorizonMetric { predictor: string; horizon: number; n: number; maePctOfBac: number; wape: number; coverage: number | null; coverageLow: number | null; coverageHigh: number | null; fallbackCount: number; }
 export interface ForecastBacktest { provenance: string; originMin: number; originMax: number; foldsEvaluated: number; foldsSkipped: number; overall: HorizonMetric[]; earlyBand: HorizonMetric[]; notes: string[]; }
+// idea-3 Estimate Assumption Stress Test
+export interface ReconciliationFailure { scope: string; check: string; line: string | null; actual: number; expected: number; delta: number; tolerance: number; }
+export interface ReconciliationItem { scope: string; quantityReDerivationOk: boolean; resourceCostIdentityOk: boolean; repeatedContractAmtConsistent: boolean; directTieOutOk: boolean; contractUpliftOk: boolean; directTieOutDelta: number; contractUpliftDelta: number; failures: ReconciliationFailure[]; }
+export interface Reconciliation { available: boolean; tiesOut: boolean; itemsChecked: number; itemsFailed: number; projectDirectDelta: number; projectUpliftDelta: number; totalDirectCost: number; totalIndirectCost: number; totalContractAmt: number; totalMargin: number; totalContingency: number; failedItems: ReconciliationItem[]; notes: string[]; }
+export interface AssumptionFlag { package: string; discipline: string | null; subTrade: string | null; unit: string | null; resourceType: string | null; kind: string; severity: string; reason: string; cohortN: number; rulesVersion: string; drivingResourceLine: string | null; }
+export interface PackageHeat { package: string; discipline: string | null; flagCount: number; highCount: number; severity: string; }
+export interface Assumptions { available: boolean; heat: PackageHeat[]; flags: AssumptionFlag[]; notes: string[]; }
+export interface PeerBenchmark { package: string; unit: string | null; resourceType: string | null; procurementRoute: string | null; subTradeAdvisory: string | null; estimatedUnitCost: number; peerMedian: number | null; peerBandLow: number | null; peerBandHigh: number | null; peerCount: number; deltaPct: number | null; status: string; }
+export interface PeerBenchmarkResponse { available: boolean; retrospective: boolean; class3NoCellMeetsMinPeers: boolean; benchmarks: PeerBenchmark[]; notes: string[]; }
 
 export const api = {
   health: () => get<Health>("/api/v1/health"),
@@ -88,4 +97,8 @@ export const api = {
   forecastCone: (bcc: string) => get<CentreForecast>(`/api/v1/forecast/cone?bcc=${encodeURIComponent(bcc)}`),
   forecastRollup: () => get<ProjectSpendScenario>("/api/v1/forecast/rollup"),
   forecastBacktest: () => get<ForecastBacktest>("/api/v1/forecast/backtest"),
+  // idea-3 stress test
+  stressReconciliation: () => get<Reconciliation>("/api/v1/stress-test/reconciliation"),
+  stressAssumptions: (discipline?: string) => get<Assumptions>(`/api/v1/stress-test/assumptions${discipline ? `?discipline=${encodeURIComponent(discipline)}` : ""}`),
+  stressPeerBenchmark: () => get<PeerBenchmarkResponse>("/api/v1/stress-test/peer-benchmark"),
 };

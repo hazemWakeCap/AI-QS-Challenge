@@ -10,8 +10,9 @@ import { Copilot } from "./components/Copilot";
 import { DataAdmin } from "./components/DataAdmin";
 import { ForecastCone } from "./components/ForecastCone";
 import { ForecastBacktestPanel } from "./components/ForecastBacktest";
+import { StressTest } from "./components/StressTest";
 
-type Tab = "overview" | "centres" | "capture" | "workflow" | "data" | "watchlist" | "forecast" | "insight";
+type Tab = "overview" | "centres" | "capture" | "workflow" | "data" | "watchlist" | "forecast" | "stress" | "insight";
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "EVM Overview" },
   { id: "centres", label: "Cost Centres" },
@@ -20,6 +21,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "data", label: "Data Admin" },
   { id: "watchlist", label: "Watchlist" },
   { id: "forecast", label: "Forecast" },
+  { id: "stress", label: "Stress Test" },
   { id: "insight", label: "Model & Copilot" },
 ];
 
@@ -105,6 +107,7 @@ export default function App() {
                 <section className="card"><ForecastBacktestPanel rev={rev} /></section>
               </div>
             )}
+            {tab === "stress" && <section className="card"><StressTest rev={rev} /></section>}
             {tab === "insight" && (
               <div className="split">
                 <section className="card"><ValidationPanel /></section>
