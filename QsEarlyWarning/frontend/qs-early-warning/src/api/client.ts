@@ -51,6 +51,13 @@ export interface EntityColumn { name: string; kind: "Text" | "Numeric" | "Int" |
 export interface EntityCaps { list: boolean; get: boolean; create: boolean; update: boolean; delete: boolean; }
 export interface EntityMeta { key: string; display: string; table: string; naturalKey: string[]; caps: EntityCaps; columns: EntityColumn[]; }
 export type EntityRow = Record<string, unknown>;
+export interface ForecastListItem { bccId: string; discipline: string | null; progressPct: number; trust: string; nextP50: number; nextP10: number | null; nextP90: number | null; nextAvailable: boolean; }
+export interface HorizonBand { horizon: number; p50: number; p10: number | null; p90: number | null; available: boolean; }
+export interface ConePoint { period: number; p50: number; p10: number | null; p90: number | null; }
+export interface CentreForecast { bccId: string; originPeriod: number; progressPct: number; bac: number; acAtOrigin: number; trust: string; increments: HorizonBand[]; cumulativeCone: ConePoint[]; cumulativeConeAvailable: boolean; directionalFinalCost: number | null; }
+export interface ProjectSpendScenario { originPeriod: number; p10: number; p50: number; p90: number; centres: number; draws: number; }
+export interface HorizonMetric { predictor: string; horizon: number; n: number; maePctOfBac: number; wape: number; coverage: number | null; coverageLow: number | null; coverageHigh: number | null; fallbackCount: number; }
+export interface ForecastBacktest { provenance: string; originMin: number; originMax: number; foldsEvaluated: number; foldsSkipped: number; overall: HorizonMetric[]; earlyBand: HorizonMetric[]; notes: string[]; }
 
 export const api = {
   health: () => get<Health>("/api/v1/health"),
@@ -76,4 +83,9 @@ export const api = {
   entityCreate: (key: string, body: EntityRow) => post<{ id: number }>(`/api/v1/entities/${key}`, body),
   entityUpdate: (key: string, id: number, body: EntityRow) => send<{ ok: boolean }>("PUT", `/api/v1/entities/${key}/${id}`, body),
   entityDelete: (key: string, id: number) => send<{ ok: boolean }>("DELETE", `/api/v1/entities/${key}/${id}`),
+  // forecast
+  forecastCostCentres: () => get<ForecastListItem[]>("/api/v1/forecast/cost-centres"),
+  forecastCone: (bcc: string) => get<CentreForecast>(`/api/v1/forecast/cone?bcc=${encodeURIComponent(bcc)}`),
+  forecastRollup: () => get<ProjectSpendScenario>("/api/v1/forecast/rollup"),
+  forecastBacktest: () => get<ForecastBacktest>("/api/v1/forecast/backtest"),
 };

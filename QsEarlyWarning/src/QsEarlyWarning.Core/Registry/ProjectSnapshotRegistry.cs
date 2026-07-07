@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using QsEarlyWarning.Core.Evaluation;
+using QsEarlyWarning.Core.Forecasting;
 using QsEarlyWarning.Domain.Entities;
 using QsEarlyWarning.Infrastructure.Postgres;
 
@@ -20,6 +21,10 @@ public sealed record ProjectSnapshot
     /// <summary>Latest reporting period present — the forecast origin, derived from the DB (not a constant 12).</summary>
     public required int ForecastPeriod { get; init; }
     public required DateTimeOffset BuiltAtUtc { get; init; }
+    /// <summary>Idea-2 incremental-spend forecaster + its back-test (null if it could not be fit). Built at
+    /// snapshot Build() and refreshed via RebuildAsync — the registry has no change detection.</summary>
+    public IncrementalSpendForecaster? Forecaster { get; init; }
+    public ForecastValidationSummary? ForecastBacktest { get; init; }
 
     public int RowCount => Panel.Count;
     public int CentreCount => Panel.Select(p => p.BccId).Distinct(StringComparer.Ordinal).Count();
@@ -100,6 +105,19 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
         var model = new RollingOriginEvaluator().Train(panel);
         var periods = panel.Select(p => p.PeriodId).ToList();
 
+        // Idea-2 forecaster: fit the serving model + run the back-test. Degrade gracefully — a
+        // forecaster failure must not sink the whole snapshot (watchlist/EVM still work).
+        IncrementalSpendForecaster? forecaster = null;
+        ForecastValidationSummary? backtest = null;
+        try
+        {
+            var f = new IncrementalSpendForecaster();
+            f.Fit(panel, model.Origins);
+            backtest = new ForecastEvaluator().Evaluate(panel, model.Origins);
+            forecaster = f;
+        }
+        catch { /* forecaster unavailable for this project; leave null */ }
+
         return new ProjectSnapshot
         {
             ProjectId = projectId,
@@ -109,6 +127,8 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
             MinPeriod = periods.Min(),
             ForecastPeriod = periods.Max(),
             BuiltAtUtc = DateTimeOffset.UtcNow,
+            Forecaster = forecaster,
+            ForecastBacktest = backtest,
         };
     }
 }

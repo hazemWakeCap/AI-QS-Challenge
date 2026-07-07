@@ -8,8 +8,10 @@ import { Watchlist } from "./components/Watchlist";
 import { ValidationPanel } from "./components/ValidationPanel";
 import { Copilot } from "./components/Copilot";
 import { DataAdmin } from "./components/DataAdmin";
+import { ForecastCone } from "./components/ForecastCone";
+import { ForecastBacktestPanel } from "./components/ForecastBacktest";
 
-type Tab = "overview" | "centres" | "capture" | "workflow" | "data" | "watchlist" | "insight";
+type Tab = "overview" | "centres" | "capture" | "workflow" | "data" | "watchlist" | "forecast" | "insight";
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "EVM Overview" },
   { id: "centres", label: "Cost Centres" },
@@ -17,6 +19,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "workflow", label: "Periods & Estimate" },
   { id: "data", label: "Data Admin" },
   { id: "watchlist", label: "Watchlist" },
+  { id: "forecast", label: "Forecast" },
   { id: "insight", label: "Model & Copilot" },
 ];
 
@@ -96,6 +99,12 @@ export default function App() {
             {tab === "workflow" && <section className="card narrow"><PeriodsPanel rev={rev} onChanged={refresh} activeVersionId={project?.activeEstimateVersionId ?? null} /></section>}
             {tab === "data" && <section className="card"><DataAdmin rev={rev} onChanged={refresh} /></section>}
             {tab === "watchlist" && <section className="card"><Watchlist period={Math.max(period, 4)} k={10} /></section>}
+            {tab === "forecast" && (
+              <div className="split">
+                <section className="card"><ForecastCone rev={rev} /></section>
+                <section className="card"><ForecastBacktestPanel rev={rev} /></section>
+              </div>
+            )}
             {tab === "insight" && (
               <div className="split">
                 <section className="card"><ValidationPanel /></section>

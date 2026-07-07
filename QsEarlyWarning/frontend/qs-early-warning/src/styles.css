@@ -145,3 +145,11 @@ table.mini { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .workflow-actions { margin-bottom: 14px; }
 .ok-msg { color: var(--forecast); background: rgba(31,157,99,.1); border: 1px solid rgba(31,157,99,.3);
   border-radius: 8px; padding: 9px 12px; font-size: 13px; margin-top: 12px; }
+
+/* forecast cost cone */
+.cone { display: block; max-width: 100%; }
+.cone-band { fill: rgba(79,140,255,.18); stroke: none; }
+.cone-p50 { stroke: var(--accent); stroke-width: 2; }
+.cone-dot { fill: var(--accent); }
+.cone-bac { stroke: var(--hist); stroke-dasharray: 4 3; stroke-width: 1; opacity: .8; }
+.cone-lbl { fill: var(--muted); font-size: 10px; }
