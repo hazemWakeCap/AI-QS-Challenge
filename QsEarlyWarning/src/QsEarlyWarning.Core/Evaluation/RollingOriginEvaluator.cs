@@ -8,9 +8,11 @@ namespace QsEarlyWarning.Core.Evaluation;
 /// <summary>The complete trained model: cutoff-keyed artifacts + the frozen validation summary.</summary>
 public sealed record TrainedModel
 {
-    /// <summary>Rule artifacts keyed by exclusive training cutoff. OOF: [MinTrainOrigin..11]; Forecast: 12.</summary>
+    /// <summary>Rule artifacts keyed by exclusive training cutoff. OOF: [FirstOrigin..LastLabeled]; Forecast: latest period.</summary>
     public required IReadOnlyDictionary<int, RuleArtifact> Artifacts { get; init; }
     public required ValidationSummary Summary { get; init; }
+    /// <summary>The reporting origins this model was trained against, derived from the panel (plan §5b).</summary>
+    public required ReportingOrigins Origins { get; init; }
 
     public RuleArtifact? ArtifactFor(int periodId)
         => Artifacts.TryGetValue(periodId, out var a) ? a : null;
@@ -31,8 +33,11 @@ public sealed class RollingOriginEvaluator
 
     public TrainedModel Train(IReadOnlyList<CostCentrePeriod> panel)
     {
-        // All labeled pairs (feature periods 1..LastLabeledPeriod).
-        var allPairs = _features.BuildPairs(panel, 1, EvmThresholds.LastLabeledPeriod).Pairs;
+        // Origins derived from the panel — NOT compile-time constants (plan §5b, codex Finding 1).
+        var origins = ReportingOrigins.FromPanel(panel);
+
+        // All labeled pairs (feature periods [firstPresent..LastLabeledPeriod]).
+        var allPairs = _features.BuildPairs(panel, origins.Periods[0], origins.LastLabeledPeriod).Pairs;
         var byPeriod = allPairs.GroupBy(p => p.PeriodId).ToDictionary(g => g.Key, g => g.ToList());
 
         var artifacts = new Dictionary<int, RuleArtifact>();
@@ -42,8 +47,8 @@ public sealed class RollingOriginEvaluator
         foreach (var (label, _) in CpiNativeScorers.All)
             cpiFolds[label] = EvmThresholds.TopK.ToDictionary(k => k, _ => new List<FoldMetrics>());
 
-        // OOF artifacts + folds for origins [MinTrainOrigin .. LastLabeledPeriod].
-        for (int o = EvmThresholds.MinTrainOrigin; o <= EvmThresholds.LastLabeledPeriod; o++)
+        // OOF artifacts + folds for origins [FirstOrigin .. LastLabeledPeriod].
+        for (int o = origins.FirstOrigin; o <= origins.LastLabeledPeriod; o++)
         {
             var trainPrefix = allPairs.Where(p => p.PeriodId < o).ToList();
             if (trainPrefix.Count == 0 || !byPeriod.TryGetValue(o, out var testFold)) continue;
@@ -63,9 +68,9 @@ public sealed class RollingOriginEvaluator
             }
         }
 
-        // Forecast artifact: trained on ALL labeled pairs (p < 12), scores period 12. No metrics.
-        var forecast = _fitter.Fit(allPairs, EvmThresholds.ForecastPeriod, ArtifactRole.Forecast);
-        artifacts[EvmThresholds.ForecastPeriod] = forecast;
+        // Forecast artifact: trained on ALL labeled pairs, scores the latest present period. No metrics.
+        var forecast = _fitter.Fit(allPairs, origins.ForecastPeriod, ArtifactRole.Forecast);
+        artifacts[origins.ForecastPeriod] = forecast;
 
         var ruleReports = EvmThresholds.TopK
             .Select(k => new ScorerReport { ScorerLabel = "rule", K = k, Folds = ruleFolds[k] })
@@ -76,20 +81,20 @@ public sealed class RollingOriginEvaluator
                 new ScorerReport { ScorerLabel = $"cpi-native:{c.Label}", K = k, Folds = cpiFolds[c.Label][k] }))
             .ToList();
 
-        var origins = artifacts.Keys.Where(c => c <= EvmThresholds.LastLabeledPeriod).ToList();
+        var scoredOrigins = artifacts.Keys.Where(c => c <= origins.LastLabeledPeriod).ToList();
         var summary = new ValidationSummary
         {
             Scorer = RuleArtifact.ScorerName,
             ScorerVersion = RuleArtifact.ScorerVersion,
             FeatureSchemaVersion = FeatureSchemaVersion,
-            EvaluationOriginMin = origins.Count == 0 ? 0 : origins.Min(),
-            EvaluationOriginMax = origins.Count == 0 ? 0 : origins.Max(),
+            EvaluationOriginMin = scoredOrigins.Count == 0 ? 0 : scoredOrigins.Min(),
+            EvaluationOriginMax = scoredOrigins.Count == 0 ? 0 : scoredOrigins.Max(),
             FoldCount = ruleFolds[EvmThresholds.SelectionK].Count,
             TotalTransitions = allPairs.Count(p => p.Label),
             Rule = ruleReports,
             CpiNative = cpiReports,
         };
 
-        return new TrainedModel { Artifacts = artifacts, Summary = summary };
+        return new TrainedModel { Artifacts = artifacts, Summary = summary, Origins = origins };
     }
 }

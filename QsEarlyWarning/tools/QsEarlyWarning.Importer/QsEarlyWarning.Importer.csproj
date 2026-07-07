@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>QsEarlyWarning.Importer</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\QsEarlyWarning.Core\QsEarlyWarning.Core.csproj" />
+    <ProjectReference Include="..\..\src\QsEarlyWarning.Infrastructure\QsEarlyWarning.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
