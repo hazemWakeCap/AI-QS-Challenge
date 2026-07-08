@@ -136,14 +136,14 @@ table.mini { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .composer input { flex: 1; background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
   border-radius: var(--r-md); padding: 9px 11px; font-size: 13px; font-family: inherit; }
 
-/* ── legacy button compatibility (bare buttons in known containers + bare .btn-sm) ──
-   Defined BEFORE the variants so .btn-secondary/.btn-danger win the background on
-   .btn.btn-sm.btn-*; the .btn-sm SIZE rule is placed LAST so its padding still wins. */
-.capture button, .workflow-actions button, .btn-sm, .composer button {
+/* ── legacy button compatibility: ONLY bare <button>s (`:not(.btn)`) inside these known
+   containers. `:not(.btn)` keeps this from out-specifying the `.btn` variant system on
+   migrated buttons that happen to live inside a `.capture` form. */
+.capture button:not(.btn), .workflow-actions button:not(.btn), .composer button:not(.btn) {
   background: var(--accent); color: #fff; border: 1px solid transparent; border-radius: var(--r-md);
   padding: 9px 16px; font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; }
-.capture button:hover, .workflow-actions button:hover, .composer button:hover { filter: brightness(1.08); }
-.capture button:disabled, .workflow-actions button:disabled, .btn-sm:disabled, .composer button:disabled { opacity: .5; cursor: default; filter: none; }
+.capture button:not(.btn):hover, .workflow-actions button:not(.btn):hover, .composer button:not(.btn):hover { filter: brightness(1.08); }
+.capture button:not(.btn):disabled, .workflow-actions button:not(.btn):disabled, .composer button:not(.btn):disabled { opacity: .5; cursor: default; filter: none; }
 .workflow-actions { margin-bottom: var(--sp-3); }
 
 /* ── button system ── */
@@ -176,6 +176,10 @@ table.mini { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 1px; border-radius: var(--r-lg) var(--r-lg) 0 0;
   background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent); pointer-events: none; }
 .card.narrow { max-width: 560px; box-shadow: var(--sh-3); }
+/* flat inline form section — avoids nested-card elevation inside admin surfaces */
+.form-panel { max-width: 560px; margin: var(--sp-3) 0; padding: var(--sp-4); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: none; }
+.form-panel .panel-head { margin-bottom: var(--sp-3); }
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
 @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
 .panel-head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
@@ -197,6 +201,11 @@ table.mini { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .spark-fill { fill: url(#sparkGrad); stroke: none; }
 .spark-th { stroke: var(--muted); stroke-dasharray: 3 3; stroke-width: 1; opacity: .5; }
 .grid-scroll { max-height: 62vh; overflow: auto; }
+/* pin the identity (first) column so it stays visible while wide tables scroll horizontally */
+.grid-scroll .grid th:first-child, .grid-scroll .grid td:first-child {
+  position: sticky; left: 0; background: var(--surface); z-index: 2; }
+.grid-scroll .grid th:first-child { z-index: 3; }
+.grid-scroll .grid tr:hover td:first-child { background: var(--surface-2); }
 .search { background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
   border-radius: var(--r-sm); padding: 6px 10px; font-size: 13px; margin-left: auto; font-family: inherit; }
 .num.bad { color: var(--bad); }
@@ -226,6 +235,10 @@ table.mini { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .empty-state .empty-icon { font-size: 30px; opacity: .7; }
 .empty-state .empty-title { color: var(--text); font-weight: 600; font-size: 15px; }
 .empty-state .empty-hint { font-size: 13px; max-width: 420px; }
+/* persistent busy banner for long-running actions (import / delete) */
+.busy-banner { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0;
+  padding: 9px 12px; background: var(--accent-weak); border: 1px solid rgba(79,140,255,.3);
+  border-radius: var(--r-md); color: var(--text); font-size: 13px; }
 
 /* idea-5 variance attribution bridge */
 tr.clickable { cursor: pointer; }
@@ -263,6 +276,10 @@ tr.clickable:hover td { background: rgba(79,140,255,.10); }
 @media (max-width: 760px) {
   .app { padding: var(--sp-4); }
   .topbar { flex-direction: column; }
-  .tabs { gap: 0; }
-  .tab { padding: 8px 10px; font-size: 12.5px; }
+  /* 10 tabs → a single horizontally-scrollable row instead of wrapping into many lines */
+  .tabs { flex-wrap: nowrap; overflow-x: auto; gap: 2px; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { padding: 8px 12px; font-size: 12.5px; white-space: nowrap; flex: 0 0 auto; scroll-snap-align: start; }
+  .form-panel, .card.narrow { max-width: 100%; }
 }

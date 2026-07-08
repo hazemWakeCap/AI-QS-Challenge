@@ -101,7 +101,7 @@ export function DataAdmin({ rev, onChanged }: { rev: number; onChanged: () => vo
         <select value={selKey} onChange={(e) => setSelKey(e.target.value)}>
           {metas.map((m) => <option key={m.key} value={m.key}>{m.display}</option>)}
         </select>
-        {meta?.caps.create && <button className="btn-sm" onClick={startAdd}>+ Add</button>}
+        {meta?.caps.create && <button className="btn btn-sm btn-primary" onClick={startAdd}>+ Add</button>}
         <span className="muted small" style={{ marginLeft: "auto" }}>{rows?.length ?? 0} rows{meta && !meta.caps.create ? " · read-only" : ""}</span>
       </div>
 
@@ -109,7 +109,7 @@ export function DataAdmin({ rev, onChanged }: { rev: number; onChanged: () => vo
       {msg && <div className="ok-msg">{msg}</div>}
 
       {editing && meta && (
-        <div className="card narrow" style={{ margin: "10px 0" }}>
+        <div className="form-panel">
           <div className="panel-head"><b>{editing === "new" ? `New ${meta.display}` : `Edit #${(editing as EntityRow).id}`}</b></div>
           <div className="capture">
             {meta.columns.filter((c) => (editing === "new" ? c.insertable : c.updatable)).map((c) => (

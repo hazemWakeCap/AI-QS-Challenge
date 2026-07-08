@@ -38,8 +38,8 @@ export function PeriodsPanel({ rev, onChanged, activeVersionId }: { rev: number;
               <td><span className={`tag tag-${p.status === "closed" ? "closed" : "green"}`}>{p.status}</span></td>
               <td>
                 {p.status === "open"
-                  ? <button className="btn-sm" disabled={busy} onClick={() => act(() => api.closePeriod(p.period), `closed period ${p.period}`)}>Close</button>
-                  : <button className="btn-sm" disabled={busy} onClick={() => act(() => api.openPeriod(p.period), `re-opened period ${p.period}`)}>Re-open</button>}
+                  ? <button className="btn btn-sm btn-secondary" disabled={busy} onClick={() => act(() => api.closePeriod(p.period), `closed period ${p.period}`)}>Close</button>
+                  : <button className="btn btn-sm btn-secondary" disabled={busy} onClick={() => act(() => api.openPeriod(p.period), `re-opened period ${p.period}`)}>Re-open</button>}
               </td>
             </tr>
           ))}

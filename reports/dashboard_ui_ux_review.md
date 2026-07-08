@@ -91,6 +91,18 @@ Most controls now use the `.btn` plus variant pattern, but Data Admin still rend
 
 **Suggested direction:** Finish migrating button markup so every command button uses `.btn` plus a variant and optional size. Then simplify the legacy compatibility rule to known legacy containers only, or remove it once all callers are migrated.
 
+## Resolution (handled 2026-07-08)
+
+All 5 findings addressed and confirmed by Codex (**all RESOLVED · NO MATERIAL FINDINGS**).
+
+1. **Mobile navigation (P1) — RESOLVED.** The ≤760px `.tabs` bar is now a single horizontally-scrollable row (`flex-wrap:nowrap; overflow-x:auto`, hidden scrollbar, `scroll-snap`; `.tab` `white-space:nowrap; flex:0 0 auto`) instead of wrapping into several lines. Verified on a 390px viewport (tabs `scrollWidth > clientWidth`).
+2. **Card-inside-card forms (P2) — RESOLVED.** Added a flat `.form-panel` (surface-2, thin border, **no** shadow); the ProjectsAdmin and DataAdmin inline create/edit forms switched from `.card narrow` to `.form-panel`, removing the nested elevation.
+3. **Table overflow on mobile (P2) — RESOLVED.** `.grid-scroll` now pins the identity (first) column `position:sticky; left:0` with a solid background + hover background, so the key column stays visible while wide tables scroll horizontally.
+4. **Action feedback (P2) — RESOLVED.** ProjectsAdmin renders a persistent `.busy-banner` (Spinner + contextual label naming the action, project, and filename) during import/re-import/delete/rename; the reconciliation summary remains visible afterward.
+5. **Button migration (P3) — RESOLVED.** DataAdmin "+ Add" and PeriodsPanel Close/Re-open migrated to `.btn .btn-sm .btn-*`; no bare `.btn-sm` remain, and the legacy compatibility rule is scoped to `button:not(.btn)` inside `.capture/.workflow-actions/.composer` only (also fixed a specificity bug where `.capture button` was overriding `.btn-secondary` on the form Cancel button).
+
+No new material issues were introduced. TypeScript clean; no console errors across tabs.
+
 ## Positive notes
 
 - The current UI has a clear dark token system, self-hosted fonts, visible focus states, and reduced-motion handling.

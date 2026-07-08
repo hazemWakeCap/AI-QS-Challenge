@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, type ImportSummary, type Project } from "../api/client";
+import { Spinner } from "./Loading";
 
 type Msg = { ok: boolean; text: string } | null;
 type NewMode = "empty" | "workbook";
@@ -26,14 +27,15 @@ export function ProjectsAdmin({ projects, onProjectsChanged }: { projects: Proje
   const [editCurrency, setEditCurrency] = useState("");
 
   const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState("Working…");
   const [msg, setMsg] = useState<Msg>(null);
 
   function resetNew() {
     setAdding(false); setName(""); setSlug(""); setCurrency("AED"); setFile(null); setNewMode("workbook");
   }
 
-  async function run<T>(fn: () => Promise<T>, ok: (r: T) => string): Promise<void> {
-    setBusy(true); setMsg(null);
+  async function run<T>(fn: () => Promise<T>, ok: (r: T) => string, label = "Working…"): Promise<void> {
+    setBusy(true); setBusyLabel(label); setMsg(null);
     try { const r = await fn(); setMsg({ ok: true, text: ok(r) }); onProjectsChanged(); }
     catch (e: unknown) { setMsg({ ok: false, text: String((e as Error).message ?? e) }); }
     finally { setBusy(false); }
@@ -42,11 +44,12 @@ export function ProjectsAdmin({ projects, onProjectsChanged }: { projects: Proje
   async function createProject() {
     const body = { name: name.trim(), slug: slug.trim(), currency: currency.trim() };
     if (newMode === "empty") {
-      await run(() => api.createProject(body), (p) => `Created empty project “${p.name}”. Upload a workbook to populate it.`);
+      await run(() => api.createProject(body), (p) => `Created empty project “${p.name}”. Upload a workbook to populate it.`,
+        `Creating “${body.name}”…`);
       resetNew();
     } else {
       if (!file) { setMsg({ ok: false, text: "Choose a workbook (.xlsx) to import." }); return; }
-      await run(() => api.importProject(body, file), summaryText);
+      await run(() => api.importProject(body, file), summaryText, `Importing “${body.name}” from ${file.name}…`);
       resetNew();
     }
   }
@@ -61,18 +64,18 @@ export function ProjectsAdmin({ projects, onProjectsChanged }: { projects: Proje
     if (editName.trim() && editName.trim() !== p.name) body.name = editName.trim();
     if (editCurrency.trim() && editCurrency.trim() !== p.reportingCurrency) body.currency = editCurrency.trim();
     if (!body.name && !body.currency) { setEditSlug(null); return; }
-    await run(() => api.updateProject(p.slug, body), () => `Updated “${editName.trim()}”.`);
+    await run(() => api.updateProject(p.slug, body), () => `Updated “${editName.trim()}”.`, `Updating “${editName.trim()}”…`);
     setEditSlug(null);
   }
 
   async function reimport(p: Project, f: File) {
     if (!confirm(`Re-import “${p.name}” from ${f.name}? This REPLACES the project's existing data.`)) return;
-    await run(() => api.reimportProject(p.slug, f), summaryText);
+    await run(() => api.reimportProject(p.slug, f), summaryText, `Re-importing “${p.name}” from ${f.name}…`);
   }
 
   async function del(p: Project) {
     if (!confirm(`Delete “${p.name}” (${p.slug}) and all its data? This cannot be undone.`)) return;
-    await run(() => api.deleteProject(p.slug), () => `Deleted “${p.name}”.`);
+    await run(() => api.deleteProject(p.slug), () => `Deleted “${p.name}”.`, `Deleting “${p.name}”…`);
   }
 
   return (
@@ -83,10 +86,11 @@ export function ProjectsAdmin({ projects, onProjectsChanged }: { projects: Proje
         <span className="muted small" style={{ marginLeft: "auto" }}>{projects.length} project{projects.length === 1 ? "" : "s"}</span>
       </div>
 
-      {msg && <div className={msg.ok ? "ok-msg" : "error"}>{msg.text}</div>}
+      {busy && <div className="busy-banner"><Spinner label={busyLabel} /></div>}
+      {!busy && msg && <div className={msg.ok ? "ok-msg" : "error"}>{msg.text}</div>}
 
       {adding && (
-        <div className="card narrow" style={{ margin: "10px 0" }}>
+        <div className="form-panel">
           <div className="panel-head"><b>New project</b></div>
           <div className="capture">
             <label>Mode&nbsp;
