@@ -146,6 +146,15 @@ table.mini { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .ok-msg { color: var(--forecast); background: rgba(31,157,99,.1); border: 1px solid rgba(31,157,99,.3);
   border-radius: 8px; padding: 9px 12px; font-size: 13px; margin-top: 12px; }
 
+/* idea-4 copilot: proactive opener + sources panel */
+.content-stack { display: flex; flex-direction: column; gap: 20px; }
+.copilot-layout { display: flex; flex-direction: column; gap: 20px; }
+.sources { margin-top: 8px; }
+.sources summary { cursor: pointer; }
+.sources-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.sources-list li { border-left: 2px solid var(--border); padding-left: 8px; }
+.source-rows { margin-top: 3px; }
+
 /* idea-3 stress-test assumption heatmap */
 .heat { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
 .heat-cell { border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; min-width: 132px; }

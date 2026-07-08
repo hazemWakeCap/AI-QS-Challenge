@@ -143,8 +143,9 @@ public sealed class EstimateStressTester
 
             bool ties = qtyOk && costIdOk && repeatedOk && directOk && upliftOk;
             double absPct = boqDirectInd is double d2 && d2 != 0 ? Math.Abs(directTieOutDelta) / Math.Abs(d2) * 100 : 0;
+            var pkg = est.MappingByItemRef.TryGetValue(boq.ItemRef, out var mp) ? mp.EstimatePackage : null;
 
-            items.Add(new ReconciliationResult(boq.ItemRef, qtyOk, costIdOk, repeatedOk, directOk, upliftOk,
+            items.Add(new ReconciliationResult(boq.ItemRef, pkg, qtyOk, costIdOk, repeatedOk, directOk, upliftOk,
                 directCost, indirectCost, directTieOutDelta, contractAmt, contractUplift, contractUpliftDelta,
                 ties, absPct, failures));
 
@@ -181,7 +182,8 @@ public sealed class EstimateStressTester
                     flags.Add(new AssumptionFlag(pkg, norm.DisciplineName, norm.SubTradeName, norm.Unit, null,
                         "OutputNormTopPercentile", "medium",
                         $"Output Norm {norm.OutputNorm:0.##} ≥ P90 ({p90:0.##}) for {norm.SubTradeName ?? norm.SubTradeCode}/{norm.Unit} (aggressive productivity assumption)",
-                        members.Count, RulesVersion, $"norm {norm.NormCode}", null));
+                        members.Count, RulesVersion, $"norm {norm.NormCode}", null,
+                        ItemRefsForNormInPackage(est, norm.NormCode, pkg)));
         }
 
         // Unit Rate — bottom decile within (resource type + description + consumption unit) cohort.
@@ -198,7 +200,7 @@ public sealed class EstimateStressTester
                 flags.Add(new AssumptionFlag(line.Package!, norm?.DisciplineName ?? DiscFromPackage(line.Package!),
                     norm?.SubTradeName, line.Unit, line.ResourceType, "UnitRateBottomOfBand", "medium",
                     $"Unit rate {line.UnitRate:0.##} ≤ P10 ({p10:0.##}) for {line.ResourceType}/{line.ResourceDescription} (thin rate)",
-                    members.Count, RulesVersion, $"{line.ItemRef} {line.ResourceDescription}", null));
+                    members.Count, RulesVersion, $"{line.ItemRef} {line.ResourceDescription}", null, new[] { line.ItemRef }));
             }
         }
 
@@ -212,11 +214,11 @@ public sealed class EstimateStressTester
             if (cp == 0)
                 flags.Add(new AssumptionFlag(pkg, norm?.DisciplineName ?? DiscFromPackage(pkg), norm?.SubTradeName,
                     boq.Unit, null, "ZeroContingency", "high", $"Contingency is 0% on item {boq.ItemRef}",
-                    est.BoqLines.Count, RulesVersion, $"item {boq.ItemRef}", null));
+                    est.BoqLines.Count, RulesVersion, $"item {boq.ItemRef}", null, new[] { boq.ItemRef }));
             else if (cp is > 0 and < ContThinThreshold)
                 flags.Add(new AssumptionFlag(pkg, norm?.DisciplineName ?? DiscFromPackage(pkg), norm?.SubTradeName,
                     boq.Unit, null, "ThinContingency", "medium", $"Contingency {cp:0.##}% (< {ContThinThreshold}%) on item {boq.ItemRef}",
-                    est.BoqLines.Count, RulesVersion, $"item {boq.ItemRef}", null));
+                    est.BoqLines.Count, RulesVersion, $"item {boq.ItemRef}", null, new[] { boq.ItemRef }));
         }
 
         var heat = flags.GroupBy(f => f.Package)
@@ -368,6 +370,12 @@ public sealed class EstimateStressTester
         est.Mappings.Where(m => string.Equals(m.NormCode, normCode, StringComparison.OrdinalIgnoreCase)
                                 && m.EstimatePackage is not null)
             .Select(m => m.EstimatePackage!).Distinct(StringComparer.Ordinal);
+
+    /// <summary>The BOQ item refs behind an OutputNorm flag: the package's items that use that norm.</summary>
+    private static IReadOnlyList<string> ItemRefsForNormInPackage(EstimateModel est, string normCode, string pkg) =>
+        est.Mappings.Where(m => string.Equals(m.NormCode, normCode, StringComparison.OrdinalIgnoreCase)
+                                && string.Equals(m.EstimatePackage, pkg, StringComparison.Ordinal))
+            .Select(m => m.ItemRef).Distinct(StringComparer.Ordinal).ToList();
 
     private static string? DiscFromPackage(string pkg)
     {

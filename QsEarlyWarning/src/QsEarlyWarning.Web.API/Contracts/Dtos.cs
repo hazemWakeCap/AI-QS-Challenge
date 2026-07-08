@@ -47,7 +47,10 @@ public sealed record CopilotTurnDto(string Role, string Text);
 
 public sealed record CopilotAskRequest(string Question, IReadOnlyList<CopilotTurnDto>? History);
 
-public sealed record CopilotEvidenceDto(string Tool, string Detail);
+public sealed record CopilotSourcesDto(
+    string? Sheet, int? ResolvedPeriod, string? Filter, int? ExcludedCount, IReadOnlyList<string> RowIds);
+
+public sealed record CopilotEvidenceDto(string Tool, string Detail, CopilotSourcesDto? Sources);
 
 public sealed record CopilotAskResponse(
     string Answer, bool Refused, IReadOnlyList<CopilotEvidenceDto> Evidence);

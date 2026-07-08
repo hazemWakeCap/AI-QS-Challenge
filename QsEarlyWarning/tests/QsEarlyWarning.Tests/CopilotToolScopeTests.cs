@@ -1,30 +1,17 @@
-using QsEarlyWarning.Core;
 using QsEarlyWarning.Core.Agent;
-using QsEarlyWarning.Core.Evaluation;
 using QsEarlyWarning.Core.Scoring;
-using QsEarlyWarning.Domain.Entities;
-using QsEarlyWarning.Infrastructure.Excel;
 using Xunit;
 
 namespace QsEarlyWarning.Tests;
 
 /// <summary>
-/// Asserts the CODE-LEVEL enforcement of the copilot tools (plan §6.8/§6.11): read-only,
-/// args validated/clamped, typed errors instead of throws. No model call involved.
+/// Asserts the CODE-LEVEL enforcement of the copilot tools (idea-4): read-only, args validated/clamped,
+/// typed errors instead of throws. Built from the tenant-scoped project snapshot. No model call involved.
 /// </summary>
 public sealed class CopilotToolScopeTests
 {
-    private static readonly IReadOnlyList<CostCentrePeriod> Panel =
-        new ExcelPanelLoader().Load(TestData.WorkbookPath);
-
-    private static QsAnalyticsTools BuildTools()
-    {
-        var loader = new StubLoader(Panel);
-        var provider = new ModelProvider(loader, "unused");
-        return new QsAnalyticsTools(provider, new WatchlistScoringService());
-    }
-
-    private static readonly QsAnalyticsTools Tools = BuildTools();
+    private static readonly QsAnalyticsTools Tools =
+        new(TestSnapshot.Build(), new WatchlistScoringService());
 
     [Fact]
     public void GetWatchlist_rejects_out_of_range_period_with_typed_error()
@@ -67,12 +54,5 @@ public sealed class CopilotToolScopeTests
     {
         var prop = result.GetType().GetProperty("error");
         return prop?.GetValue(result) as string;
-    }
-
-    private sealed class StubLoader : IPanelLoader
-    {
-        private readonly IReadOnlyList<CostCentrePeriod> _panel;
-        public StubLoader(IReadOnlyList<CostCentrePeriod> panel) => _panel = panel;
-        public IReadOnlyList<CostCentrePeriod> Load(string workbookPath) => _panel;
     }
 }

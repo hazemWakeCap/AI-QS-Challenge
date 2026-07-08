@@ -9,9 +9,10 @@ namespace QsEarlyWarning.Core.StressTest;
 public sealed record ReconciliationFailure(
     string Scope, string Check, string? Line, double Actual, double Expected, double Delta, double Tolerance);
 
-/// <summary>Class 1 — per BOQ item. Every conjunct is its own boolean; <see cref="TiesOut"/> is their AND.</summary>
+/// <summary>Class 1 — per BOQ item. Every conjunct is its own boolean; <see cref="TiesOut"/> is their AND.
+/// <c>Package</c> (from the item's mapping) lets a package-scoped consumer filter + cite these rows.</summary>
 public sealed record ReconciliationResult(
-    string Scope,
+    string Scope, string? Package,
     bool QuantityReDerivationOk, bool ResourceCostIdentityOk, bool RepeatedContractAmtConsistent,
     bool DirectTieOutOk, bool ContractUpliftOk,
     double DirectCost, double IndirectCost, double DirectTieOutDelta,
@@ -27,11 +28,13 @@ public sealed record ReconciliationSummary(
     double TotalMargin, double TotalContingency,
     IReadOnlyList<ReconciliationResult> Items);
 
-/// <summary>Class 2 — one estimate-side assumption flagged for QS review (a prompt, not a verdict).</summary>
+/// <summary>Class 2 — one estimate-side assumption flagged for QS review (a prompt, not a verdict).
+/// <c>SourceItemRefs</c> are the BOQ item refs behind the flag (citable source rows) — for an
+/// OutputNorm flag these are the package's items using that norm, not just the norm code.</summary>
 public sealed record AssumptionFlag(
     string Package, string? Discipline, string? SubTrade, string? Unit, string? ResourceType,
     string Kind, string Severity, string Reason, int CohortN, string RulesVersion,
-    string? DrivingResourceLine, double? EstimatedUnitCost);
+    string? DrivingResourceLine, double? EstimatedUnitCost, IReadOnlyList<string> SourceItemRefs);
 
 /// <summary>Class 2 heatmap cell — assumption-flag severity aggregated per package × discipline.</summary>
 public sealed record PackageHeatCell(

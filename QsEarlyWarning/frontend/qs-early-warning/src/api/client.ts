@@ -42,7 +42,8 @@ export interface Period { id: number; period: number; periodStart: string; statu
 export interface WatchlistRow { rank: number; bccId: string; discipline: string | null; packageCode: string; riskScore: number; cpi: number; gap: number; riskIndicators: string[]; }
 export interface WatchlistResponse { period: number; k: number; isForecast: boolean; artifactVersion: string; trainingCutoffPeriod: number; eligibleCount: number; rows: WatchlistRow[]; }
 export interface CopilotTurn { role: "user" | "assistant"; text: string; }
-export interface CopilotEvidence { tool: string; detail: string; }
+export interface CopilotSources { sheet: string | null; resolvedPeriod: number | null; filter: string | null; excludedCount: number | null; rowIds: string[]; }
+export interface CopilotEvidence { tool: string; detail: string; sources: CopilotSources | null; }
 export interface CopilotAskResponse { answer: string; refused: boolean; evidence: CopilotEvidence[]; }
 export interface FoldMetric { periodId: number; k: number; kEffective: number; eligible: number; positives: number; truePositives: number; falsePositives: number; falseNegatives: number; precision: number | null; recall: number | null; }
 export interface ScorerReport { scorerLabel: string; k: number; macroPrecision: number | null; macroRecall: number | null; precisionMin: number | null; precisionMax: number | null; falseAlertsPerCycle: number; folds: FoldMetric[]; }

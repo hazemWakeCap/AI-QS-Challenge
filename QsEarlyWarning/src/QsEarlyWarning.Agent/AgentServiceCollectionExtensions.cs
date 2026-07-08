@@ -17,9 +17,8 @@ public static class AgentServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddQsCostCopilot(this IServiceCollection services, IConfiguration config)
     {
-        // Tools are framework-agnostic and always available (Core).
-        services.AddSingleton<QsAnalyticsTools>();
-
+        // Idea-4: QsAnalyticsTools are now built PER REQUEST from the caller's tenant-scoped snapshot
+        // (in CopilotController, after RLS membership resolution) — no longer a singleton.
         var apiKey = config["Copilot:AnthropicApiKey"]
                      ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
         var model = config["Copilot:Model"] ?? "claude-sonnet-5";
@@ -39,7 +38,6 @@ public static class AgentServiceCollectionExtensions
 
         services.AddSingleton<IQsCostCopilotAgent>(sp => new ClaudeQsCostCopilotAgent(
             sp.GetRequiredService<IChatClient>(),
-            sp.GetRequiredService<QsAnalyticsTools>(),
             sp.GetRequiredService<ILogger<ClaudeQsCostCopilotAgent>>()));
 
         return services;

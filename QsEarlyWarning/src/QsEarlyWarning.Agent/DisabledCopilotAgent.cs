@@ -9,7 +9,7 @@ namespace QsEarlyWarning.Agent;
 public sealed class DisabledCopilotAgent : IQsCostCopilotAgent
 {
     public Task<CopilotAskResult> AskAsync(
-        string question, IReadOnlyList<CopilotTurn> history, CancellationToken ct)
+        string question, IReadOnlyList<CopilotTurn> history, QsAnalyticsTools tools, CancellationToken ct)
         => Task.FromResult(CopilotAskResult.Text(
             "The copilot is not configured. Set the ANTHROPIC_API_KEY environment variable (or " +
             "Copilot:AnthropicApiKey in config) and restart the API to enable it. The watchlist and " +

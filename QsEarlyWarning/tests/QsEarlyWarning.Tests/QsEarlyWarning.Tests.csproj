@@ -21,6 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\QsEarlyWarning.Agent\QsEarlyWarning.Agent.csproj" />
     <ProjectReference Include="..\..\src\QsEarlyWarning.Core\QsEarlyWarning.Core.csproj" />
     <ProjectReference Include="..\..\src\QsEarlyWarning.Infrastructure\QsEarlyWarning.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\QsEarlyWarning.Domain\QsEarlyWarning.Domain.csproj" />

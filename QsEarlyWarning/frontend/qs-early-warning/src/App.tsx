@@ -109,9 +109,9 @@ export default function App() {
             )}
             {tab === "stress" && <section className="card"><StressTest rev={rev} /></section>}
             {tab === "insight" && (
-              <div className="split">
+              <div className="content-stack">
+                <Copilot period={period} />
                 <section className="card"><ValidationPanel /></section>
-                <section className="card"><Copilot /></section>
               </div>
             )}
           </>

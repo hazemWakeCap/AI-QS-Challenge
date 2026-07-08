@@ -17,7 +17,6 @@ namespace QsEarlyWarning.Agent;
 public sealed class ClaudeQsCostCopilotAgent : IQsCostCopilotAgent
 {
     private readonly IChatClient _chatClient;
-    private readonly QsAnalyticsTools _tools;
     private readonly ILogger<ClaudeQsCostCopilotAgent> _logger;
 
     private const int MaxHistoryTurns = 10;
@@ -30,15 +29,14 @@ public sealed class ClaudeQsCostCopilotAgent : IQsCostCopilotAgent
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public ClaudeQsCostCopilotAgent(
-        IChatClient chatClient, QsAnalyticsTools tools, ILogger<ClaudeQsCostCopilotAgent> logger)
+        IChatClient chatClient, ILogger<ClaudeQsCostCopilotAgent> logger)
     {
         _chatClient = chatClient;
-        _tools = tools;
         _logger = logger;
     }
 
     public async Task<CopilotAskResult> AskAsync(
-        string question, IReadOnlyList<CopilotTurn> history, CancellationToken ct)
+        string question, IReadOnlyList<CopilotTurn> history, QsAnalyticsTools tools, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(question))
             return CopilotAskResult.Text("Ask me about a cost centre or the watchlist.", refused: true);
@@ -47,7 +45,7 @@ public sealed class ClaudeQsCostCopilotAgent : IQsCostCopilotAgent
             return CopilotAskResult.Text(CopilotPrompts.OutOfScopeRefusal, refused: true);
 
         var tracker = new ToolCallTracker();
-        var agent = BuildAgent(tracker);
+        var agent = BuildAgent(tracker, tools);
 
         var messages = BuildMessages(question, history);
         // Note: newer Claude models reject the `temperature` parameter, so we don't set it.
@@ -80,26 +78,33 @@ public sealed class ClaudeQsCostCopilotAgent : IQsCostCopilotAgent
         }
     }
 
-    private AIAgent BuildAgent(ToolCallTracker tracker)
+    private AIAgent BuildAgent(ToolCallTracker tracker, QsAnalyticsTools tools)
     {
         var aiTools = new List<AITool>
         {
-            AIFunctionFactory.Create(_tools.GetWatchlist),
-            AIFunctionFactory.Create(_tools.GetCostCentreDetail),
-            AIFunctionFactory.Create(_tools.ExplainDrift),
-            AIFunctionFactory.Create(_tools.GetEvmSnapshot),
+            AIFunctionFactory.Create(tools.GetWatchlist),
+            AIFunctionFactory.Create(tools.GetCostCentreDetail),
+            AIFunctionFactory.Create(tools.ExplainDrift),
+            AIFunctionFactory.Create(tools.GetEvmSnapshot),
+            AIFunctionFactory.Create(tools.ForecastIncrementalSpend),
+            AIFunctionFactory.Create(tools.DirectionalEac),
+            AIFunctionFactory.Create(tools.ResourceSplit),
+            AIFunctionFactory.Create(tools.ProjectEvm),
+            AIFunctionFactory.Create(tools.StressFlagsForPackage),
         };
 
-        // Middleware: record each tool call for the sanitized evidence trail, and turn tool
-        // exceptions into a structured result the model can recover from (never 500 the run).
-        ValueTask<object?> ToolMiddleware(
+        // Middleware: record each tool call (args + returned `sources` provenance) for the sanitized
+        // evidence trail, and turn tool exceptions into a structured result the model can recover from
+        // (never 500 the run).
+        async ValueTask<object?> ToolMiddleware(
             AIAgent agent,
             FunctionInvocationContext ctx,
             Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>> next,
             CancellationToken ct)
         {
-            tracker.Record(ctx.Function.Name, ctx.Arguments);
-            return InvokeSafely(ctx, next, ct);
+            var result = await InvokeSafely(ctx, next, ct).ConfigureAwait(false);
+            tracker.Record(ctx.Function.Name, ctx.Arguments, ExtractSources(result));
+            return result;
         }
 
         return new ChatClientAgent(
@@ -145,18 +150,23 @@ public sealed class ClaudeQsCostCopilotAgent : IQsCostCopilotAgent
         return messages;
     }
 
+    /// <summary>Reflects the tool result's `sources` property (a Core <see cref="CopilotSources"/>)
+    /// so the evidence trail carries the sheet / resolved filter / excluded count / source row IDs.</summary>
+    private static CopilotSources? ExtractSources(object? result) =>
+        result?.GetType().GetProperty("sources")?.GetValue(result) as CopilotSources;
+
     /// <summary>Records tool calls into a sanitized evidence trail (no raw framework objects).</summary>
     private sealed class ToolCallTracker
     {
         private readonly List<CopilotEvidence> _evidence = new();
         public IReadOnlyList<CopilotEvidence> Evidence => _evidence;
 
-        public void Record(string tool, IDictionary<string, object?>? args)
+        public void Record(string tool, IDictionary<string, object?>? args, CopilotSources? sources)
         {
             var detail = args is null || args.Count == 0
                 ? ""
                 : string.Join(", ", args.Select(kv => $"{kv.Key}={kv.Value}"));
-            _evidence.Add(new CopilotEvidence(tool, detail));
+            _evidence.Add(new CopilotEvidence(tool, detail, sources));
         }
     }
 }
