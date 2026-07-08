@@ -33,12 +33,17 @@ public static class TestSnapshot
         catch { /* forecaster unavailable */ }
 
         StressTestReport? stress = null;
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>>? mix = null;
         try
         {
             var est = new EstimateWorkbookLoader(TestData.WorkbookPath, OwningId).TryLoadForProject(OwningId);
-            if (est is not null) stress = new EstimateStressTester().Run(est, panel);
+            if (est is not null)
+            {
+                stress = new EstimateStressTester().Run(est, panel);
+                mix = BuildResourceMix(est);
+            }
         }
-        catch { /* stress test unavailable */ }
+        catch { /* stress test / mix unavailable */ }
 
         return new ProjectSnapshot
         {
@@ -52,6 +57,27 @@ public static class TestSnapshot
             Forecaster = forecaster,
             ForecastBacktest = backtest,
             StressTest = stress,
+            ResourceMix = mix,
         };
+    }
+
+    private static readonly HashSet<string> Canonical =
+        new(StringComparer.OrdinalIgnoreCase) { "MANPOWER", "MATERIAL", "EQUIPMENT", "SUBCONTRACT" };
+
+    // Mirrors ProjectSnapshotRegistry.BuildResourceMix so the eval runs without Postgres.
+    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> BuildResourceMix(
+        QsEarlyWarning.Domain.Estimate.EstimateModel est)
+    {
+        var byPkg = new Dictionary<string, Dictionary<string, double>>(StringComparer.Ordinal);
+        foreach (var line in est.ResourceLines)
+        {
+            if (line.Package is not string pkg || !pkg.StartsWith("EP-", StringComparison.OrdinalIgnoreCase)) continue;
+            var type = line.ResourceType?.Trim().ToUpperInvariant();
+            if (type is null || !Canonical.Contains(type)) continue;
+            if (line.ResourceCost is not double cost || !double.IsFinite(cost)) continue;
+            if (!byPkg.TryGetValue(pkg, out var m)) byPkg[pkg] = m = new(StringComparer.OrdinalIgnoreCase);
+            m[type] = m.GetValueOrDefault(type) + cost;
+        }
+        return byPkg.ToDictionary(kv => kv.Key, kv => (IReadOnlyDictionary<string, double>)kv.Value, StringComparer.Ordinal);
     }
 }

@@ -11,6 +11,7 @@ import { DataAdmin } from "./components/DataAdmin";
 import { ForecastCone } from "./components/ForecastCone";
 import { ForecastBacktestPanel } from "./components/ForecastBacktest";
 import { StressTest } from "./components/StressTest";
+import { VarianceCard } from "./components/VarianceCard";
 
 type Tab = "overview" | "centres" | "capture" | "workflow" | "data" | "watchlist" | "forecast" | "stress" | "insight";
 const TABS: { id: Tab; label: string }[] = [
@@ -34,6 +35,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("overview");
   const [rev, setRev] = useState(0);
   const [err, setErr] = useState<string | null>(null);
+  const [varianceBcc, setVarianceBcc] = useState<string | null>(null);
 
   const project = projects.find((p) => p.slug === slug) ?? null;
 
@@ -100,7 +102,16 @@ export default function App() {
             {tab === "capture" && <section className="card narrow"><CapturePanel period={period} rev={rev} onChanged={refresh} /></section>}
             {tab === "workflow" && <section className="card narrow"><PeriodsPanel rev={rev} onChanged={refresh} activeVersionId={project?.activeEstimateVersionId ?? null} /></section>}
             {tab === "data" && <section className="card"><DataAdmin rev={rev} onChanged={refresh} /></section>}
-            {tab === "watchlist" && <section className="card"><Watchlist period={Math.max(period, 4)} k={10} /></section>}
+            {tab === "watchlist" && (
+              <div className="content-stack">
+                <section className="card">
+                  <div className="panel-head"><span className="pill pill-blue">WATCHLIST</span>
+                    <span className="muted small">Click a row to explain its variance (idea-5 attribution bridge).</span></div>
+                  <Watchlist period={Math.max(period, 4)} k={10} onSelect={setVarianceBcc} />
+                </section>
+                {varianceBcc && <section className="card"><VarianceCard bcc={varianceBcc} period={Math.max(period, 4)} /></section>}
+              </div>
+            )}
             {tab === "forecast" && (
               <div className="split">
                 <section className="card"><ForecastCone rev={rev} /></section>

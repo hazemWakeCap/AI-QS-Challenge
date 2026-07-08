@@ -184,4 +184,26 @@ public sealed class CopilotEvalTests
         var result = Tools.StressFlagsForPackage("EP-NOT-A-PACKAGE");
         Assert.True((bool)P(result, "available")!);   // estimate exists; just no rows for this package
     }
+
+    // ── idea-5 variance attribution tool ──
+
+    [Fact]
+    public void ExplainVariance_returns_an_attribution_with_the_assumption_flag()
+    {
+        var row = Panel.First(p => p.PeriodId == 8 && p.PackageCode.StartsWith("EP-")
+            && p.EvAed is > 0 && p.AcCumulative is double && p.PvAed is double);
+        var result = Tools.ExplainVariance(row.BccId, 8);
+        Assert.NotNull(P(result, "cvAed"));
+        Assert.NotNull(P(result, "svAed"));
+        Assert.True((bool)P(result, "assumptionBased")!);
+        Assert.NotNull(P(result, "evidenceNeeded"));
+        Assert.NotNull(P(result, "dominantResource"));
+    }
+
+    [Fact]
+    public void ExplainVariance_unknown_or_not_started_is_unavailable_not_a_guess()
+    {
+        Assert.Null(Err(Tools.ExplainVariance("BCC-DOES-NOT-EXIST", 8)));   // no typed error…
+        Assert.False((bool)P(Tools.ExplainVariance("BCC-DOES-NOT-EXIST", 8), "available")!); // …just available:false
+    }
 }

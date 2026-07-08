@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type WatchlistResponse } from "../api/client";
 
-export function Watchlist({ period, k }: { period: number; k: number }) {
+export function Watchlist({ period, k, onSelect }: { period: number; k: number; onSelect?: (bccId: string) => void }) {
   const [data, setData] = useState<WatchlistResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -50,7 +50,9 @@ export function Watchlist({ period, k }: { period: number; k: number }) {
         </thead>
         <tbody>
           {data.rows.map((r) => (
-            <tr key={r.bccId}>
+            <tr key={r.bccId} className={onSelect ? "clickable" : undefined}
+                onClick={onSelect ? () => onSelect(r.bccId) : undefined}
+                title={onSelect ? "Explain this centre's variance" : undefined}>
               <td className="rank">{r.rank}</td>
               <td className="mono">{r.bccId}</td>
               <td>{r.discipline ?? "—"}</td>

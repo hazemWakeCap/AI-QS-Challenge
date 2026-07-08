@@ -146,6 +146,12 @@ table.mini { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .ok-msg { color: var(--forecast); background: rgba(31,157,99,.1); border: 1px solid rgba(31,157,99,.3);
   border-radius: 8px; padding: 9px 12px; font-size: 13px; margin-top: 12px; }
 
+/* idea-5 variance attribution bridge */
+tr.clickable { cursor: pointer; }
+tr.clickable:hover td { background: rgba(79,140,255,.10); }
+.varflags { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 2px; }
+.waterfall { display: block; margin-top: 12px; max-width: 100%; }
+
 /* idea-4 copilot: proactive opener + sources panel */
 .content-stack { display: flex; flex-direction: column; gap: 20px; }
 .copilot-layout { display: flex; flex-direction: column; gap: 20px; }

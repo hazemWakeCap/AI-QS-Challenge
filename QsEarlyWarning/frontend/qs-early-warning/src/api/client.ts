@@ -68,6 +68,17 @@ export interface PackageHeat { package: string; discipline: string | null; flagC
 export interface Assumptions { available: boolean; heat: PackageHeat[]; flags: AssumptionFlag[]; notes: string[]; }
 export interface PeerBenchmark { package: string; unit: string | null; resourceType: string | null; procurementRoute: string | null; subTradeAdvisory: string | null; estimatedUnitCost: number; peerMedian: number | null; peerBandLow: number | null; peerBandHigh: number | null; peerCount: number; deltaPct: number | null; status: string; }
 export interface PeerBenchmarkResponse { available: boolean; retrospective: boolean; class3NoCellMeetsMinPeers: boolean; benchmarks: PeerBenchmark[]; notes: string[]; }
+// idea-5 Variance Attribution Bridge
+export interface ResourceContribution { resourceType: string; normShare: number; evR: number; acR: number; cvR: number; timesNormBudget: number | null; }
+export interface VarianceBridge {
+  bccId: string; periodId: number; available: boolean; unavailableReason: string | null;
+  package: string | null; discipline: string | null;
+  bac: number | null; pv: number | null; ev: number | null; ac: number | null;
+  cvAed: number | null; svAed: number | null; spi: number | null;
+  contributions: ResourceContribution[]; dominantResourceType: string | null;
+  unexplainedResidual: number | null; tiesOut: boolean; resourceBreakdownAvailable: boolean;
+  assumptionBased: boolean; evidenceNeeded: string | null; notes: string[];
+}
 
 export const api = {
   health: () => get<Health>("/api/v1/health"),
@@ -102,4 +113,7 @@ export const api = {
   stressReconciliation: () => get<Reconciliation>("/api/v1/stress-test/reconciliation"),
   stressAssumptions: (discipline?: string) => get<Assumptions>(`/api/v1/stress-test/assumptions${discipline ? `?discipline=${encodeURIComponent(discipline)}` : ""}`),
   stressPeerBenchmark: () => get<PeerBenchmarkResponse>("/api/v1/stress-test/peer-benchmark"),
+  // idea-5 variance attribution
+  variance: (bcc: string, period: number) =>
+    get<VarianceBridge>(`/api/v1/variance?bcc=${encodeURIComponent(bcc)}&period=${period}`),
 };

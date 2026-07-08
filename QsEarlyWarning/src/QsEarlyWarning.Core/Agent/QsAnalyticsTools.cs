@@ -2,6 +2,7 @@ using System.ComponentModel;
 using QsEarlyWarning.Core.Forecasting;
 using QsEarlyWarning.Core.Registry;
 using QsEarlyWarning.Core.Scoring;
+using QsEarlyWarning.Core.Variance;
 using QsEarlyWarning.Domain.Constants;
 using QsEarlyWarning.Domain.Entities;
 using QsEarlyWarning.Domain.ValueObjects;
@@ -328,6 +329,43 @@ public sealed class QsAnalyticsTools
     }
 
     private const string EstimateStressVersion = "v1";
+
+    // ── idea-5 surface: variance attribution bridge (the "why" behind a flag) ──
+
+    [Description("Explain WHY a cost centre is over/under budget: attribute its cost variance (CV = EV - AC) " +
+                 "to the dominant resource category (manpower/material/equipment/subcontract) using estimate " +
+                 "shares, and report the schedule lane (SV = EV - PV). This is an ATTRIBUTION, not a proven " +
+                 "cause — the named driver is a hypothesis; state the assumption badge and what evidence " +
+                 "would confirm it. Only diagnoses live (EV>0) EP- packages.")]
+    public object ExplainVariance(
+        [Description("Cost centre id")] string bccId,
+        [Description("Reporting period, 4..12")] int periodId)
+    {
+        if (string.IsNullOrWhiteSpace(bccId)) return Err("bccId is required.");
+        if (!PresentPeriod(periodId)) return Err($"periodId must be {_snapshot.MinPeriod}..{_snapshot.ForecastPeriod}.");
+
+        var b = new VarianceAttributor().Attribute(Panel, _snapshot.ResourceMix, bccId, periodId);
+        if (!b.Available) return new { bccId, periodId, available = false, reason = b.UnavailableReason };
+
+        return new
+        {
+            bccId, periodId,
+            cvAed = b.CvAed, svAed = b.SvAed, spi = b.Spi,
+            dominantResource = b.DominantResourceType,
+            resourceBreakdownAvailable = b.ResourceBreakdownAvailable,
+            assumptionBased = b.AssumptionBased,
+            evidenceNeeded = b.EvidenceNeeded,
+            unexplainedResidual = b.UnexplainedResidual,
+            tiesOut = b.TiesOut,
+            contributions = b.Contributions.Select(c => new
+            {
+                c.ResourceType, evR = c.EvR, acR = c.AcR, cvR = c.CvR, timesNormBudget = c.TimesNormBudget,
+            }),
+            sources = Src("9_HISTORICAL_DATA + estimate resource mix", periodId,
+                b.Package is null ? bccId : $"{bccId} · {b.Package}", excluded: null,
+                rowIds: new[] { Key(bccId, periodId) }),
+        };
+    }
 
     // ── helpers ──
 

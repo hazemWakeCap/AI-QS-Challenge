@@ -30,6 +30,10 @@ public sealed record ProjectSnapshot
     /// <summary>Idea-3 Estimate Assumption Stress Test (null unless this is the estimate's owning project,
     /// or if the workbook is unavailable). Built at snapshot Build() from the workbook + this panel.</summary>
     public StressTestReport? StressTest { get; init; }
+    /// <summary>Idea-5: per-package norm-implied resource-cost mix (aggregate Σ Resource Cost by canonical
+    /// resource type, EP- packages only) for the variance-attribution bridge. Null unless this is the
+    /// estimate's owning project. A computed aggregate, never raw estimate rows.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>>? ResourceMix { get; init; }
 
     public int RowCount => Panel.Count;
     public int CentreCount => Panel.Select(p => p.BccId).Distinct(StringComparer.Ordinal).Count();
@@ -128,16 +132,20 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
         }
         catch { /* forecaster unavailable for this project; leave null */ }
 
-        // Idea-3 stress test: only the estimate's owning project returns a model (gated by project id);
-        // Class 1+2 use the workbook, Class 3 uses this panel. Degrade gracefully like the forecaster.
+        // Idea-3 stress test + Idea-5 resource mix: only the estimate's owning project returns a model
+        // (gated by project id). Degrade gracefully like the forecaster.
         StressTestReport? stressTest = null;
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>>? resourceMix = null;
         try
         {
             var estimate = _estimate?.TryLoadForProject(projectId);
             if (estimate is not null)
+            {
                 stressTest = new EstimateStressTester().Run(estimate, panel);
+                resourceMix = BuildResourceMix(estimate);   // Idea-5: per-package resource-cost shares
+            }
         }
-        catch { /* stress test unavailable for this project; leave null */ }
+        catch { /* stress test / mix unavailable for this project; leave null */ }
 
         return new ProjectSnapshot
         {
@@ -151,6 +159,32 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
             Forecaster = forecaster,
             ForecastBacktest = backtest,
             StressTest = stressTest,
+            ResourceMix = resourceMix,
         };
+    }
+
+    private static readonly HashSet<string> CanonicalResources =
+        new(StringComparer.OrdinalIgnoreCase) { "MANPOWER", "MATERIAL", "EQUIPMENT", "SUBCONTRACT" };
+
+    /// <summary>Idea-5: aggregate Σ Resource Cost by (EP- package, canonical resource type) — a computed
+    /// aggregate the variance bridge normalizes into norm-implied shares. Never exposes raw estimate rows.</summary>
+    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> BuildResourceMix(
+        QsEarlyWarning.Domain.Estimate.EstimateModel estimate)
+    {
+        var byPackage = new Dictionary<string, Dictionary<string, double>>(StringComparer.Ordinal);
+        foreach (var line in estimate.ResourceLines)
+        {
+            if (line.Package is not string pkg || !pkg.StartsWith("EP-", StringComparison.OrdinalIgnoreCase)) continue;
+            var type = line.ResourceType?.Trim().ToUpperInvariant();
+            if (type is null || !CanonicalResources.Contains(type)) continue;
+            if (line.ResourceCost is not double cost || !double.IsFinite(cost)) continue;
+
+            if (!byPackage.TryGetValue(pkg, out var mix)) byPackage[pkg] = mix = new(StringComparer.OrdinalIgnoreCase);
+            mix[type] = mix.GetValueOrDefault(type) + cost;
+        }
+        return byPackage.ToDictionary(
+            kv => kv.Key,
+            kv => (IReadOnlyDictionary<string, double>)kv.Value,
+            StringComparer.Ordinal);
     }
 }

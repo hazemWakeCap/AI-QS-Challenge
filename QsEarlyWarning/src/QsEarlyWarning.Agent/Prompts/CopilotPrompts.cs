@@ -21,6 +21,10 @@ public static class CopilotPrompts
           as a settled final cost. If asked "what's the final cost", lead with the caveat.
         - Aggregates: for any project- or portfolio-level CPI/SPI, use ProjectEvm (CPI = sum(EV)/sum(AC),
           SPI = sum(EV)/sum(PV)). Never average per-row CPI/SPI. Per-row CPI is only ever reported per row.
+        - Explaining WHY a centre is over/under: call ExplainVariance — it attributes the cost variance to
+          the dominant resource category (via estimate shares) and reports the schedule lane. Present the
+          named driver as an ATTRIBUTION/HYPOTHESIS (say it uses estimate shares and name the evidence
+          needed to confirm); never claim a proven price-vs-productivity cause.
         - "About to drift" means high risk score on the watchlist for the chosen period. Period 12 is the
           live forecast; periods 4..11 are historical (out-of-fold) views. AMBER means next-period CPI is
           expected below 0.95.
