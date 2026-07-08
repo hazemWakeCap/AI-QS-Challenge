@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type ForecastBacktest, type HorizonMetric } from "../api/client";
+import { pct, pctOfFraction, DASH } from "../format";
+import { Spinner } from "./Loading";
 
 const PREDICTORS = ["model", "planned-spend", "cpi-based", "recent-run-rate", "zero-increment"];
 
@@ -14,7 +16,7 @@ export function ForecastBacktestPanel({ rev }: { rev: number }) {
   }, [rev]);
 
   if (err) return <div className="error">{err}</div>;
-  if (!d) return <div className="muted">Loading back-test…</div>;
+  if (!d) return <Spinner label="Loading back-test…" />;
 
   const rows = band === "overall" ? d.overall : d.earlyBand;
   const horizons = [1, 2, 3];
@@ -43,7 +45,7 @@ export function ForecastBacktestPanel({ rev }: { rev: number }) {
               {horizons.map((h) => {
                 const m = cell(p, h);
                 const isBest = m && Math.abs(m.maePctOfBac - best(h)) < 1e-9;
-                return <td key={h} className="num" style={isBest ? { color: "var(--forecast)", fontWeight: 700 } : undefined}>{m ? m.maePctOfBac.toFixed(2) + "%" : "—"}</td>;
+                return <td key={h} className="num" style={isBest ? { color: "var(--good)", fontWeight: 700 } : undefined}>{m ? pct(m.maePctOfBac, 2) : DASH}</td>;
               })}
             </tr>
           ))}
@@ -57,9 +59,9 @@ export function ForecastBacktestPanel({ rev }: { rev: number }) {
           {horizons.map((h) => { const m = modelCov(h); return (
             <tr key={h}>
               <td>h={h}</td>
-              <td className="num">{m?.coverage != null ? (m.coverage * 100).toFixed(0) + "%" : "—"}</td>
-              <td className="num">{m?.n ?? "—"}</td>
-              <td className="muted">{m?.coverageLow != null && m?.coverageHigh != null ? `${(m.coverageLow * 100).toFixed(0)}–${(m.coverageHigh * 100).toFixed(0)}%` : "—"}</td>
+              <td className="num">{pctOfFraction(m?.coverage)}</td>
+              <td className="num">{m?.n ?? DASH}</td>
+              <td className="muted">{m?.coverageLow != null && m?.coverageHigh != null ? `${(m.coverageLow * 100).toFixed(0)}–${pctOfFraction(m.coverageHigh)}` : DASH}</td>
             </tr>
           ); })}
         </tbody>

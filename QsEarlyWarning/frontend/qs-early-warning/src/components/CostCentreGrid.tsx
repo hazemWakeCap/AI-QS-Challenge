@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, type CostCentreEvm } from "../api/client";
+import { money, ratio, pct } from "../format";
+import { Spinner } from "./Loading";
 
-const money = (v: number) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(v);
-
-export function CostCentreGrid({ period, rev }: { period: number; rev: number }) {
+export function CostCentreGrid({ period, rev, currency = "AED" }: { period: number; rev: number; currency?: string }) {
   const [rows, setRows] = useState<CostCentreEvm[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -16,7 +16,7 @@ export function CostCentreGrid({ period, rev }: { period: number; rev: number })
   }, [period, rev]);
 
   if (err) return <div className="error">{err}</div>;
-  if (!rows) return <div className="muted">Loading…</div>;
+  if (!rows) return <Spinner />;
   const filtered = rows.filter((r) => !q || r.bccId.toLowerCase().includes(q.toLowerCase()));
 
   return (
@@ -36,13 +36,13 @@ export function CostCentreGrid({ period, rev }: { period: number; rev: number })
                 <td className="mono">{r.bccId}</td>
                 <td className="muted">{r.discipline ?? "—"}</td>
                 <td><span className={`tag tag-${r.alertLevel.toLowerCase().replace("_", "")}`}>{r.alertLevel.replace("_", " ")}</span></td>
-                <td className="num">{money(r.bac)}</td>
-                <td className="num">{r.plannedPct?.toFixed(1) ?? "—"}</td>
-                <td className="num">{r.actualPct?.toFixed(1) ?? "—"}</td>
-                <td className="num">{money(r.ev)}</td>
-                <td className="num">{money(r.ac)}</td>
-                <td className={`num ${r.cpi != null && r.cpi < 0.95 ? "bad" : ""}`}>{r.cpi?.toFixed(3) ?? "—"}</td>
-                <td className="num">{money(r.eac)}</td>
+                <td className="num">{money(r.bac, currency)}</td>
+                <td className="num">{pct(r.plannedPct)}</td>
+                <td className="num">{pct(r.actualPct)}</td>
+                <td className="num">{money(r.ev, currency)}</td>
+                <td className="num">{money(r.ac, currency)}</td>
+                <td className={`num ${r.cpi != null && r.cpi < 0.95 ? "bad" : ""}`}>{ratio(r.cpi)}</td>
+                <td className="num">{money(r.eac, currency)}</td>
               </tr>
             ))}
           </tbody>

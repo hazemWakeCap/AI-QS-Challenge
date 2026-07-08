@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type ValidationSummary, type ScorerReport } from "../api/client";
-
-const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toFixed(0)}%`);
+import { pctOfFraction as pct } from "../format";
+import { Spinner } from "./Loading";
 
 export function ValidationPanel() {
   const [data, setData] = useState<ValidationSummary | null>(null);
@@ -12,7 +12,7 @@ export function ValidationPanel() {
   }, []);
 
   if (error) return <div className="error">Validation summary unavailable: {error}</div>;
-  if (!data) return <div className="muted">Loading model validation…</div>;
+  if (!data) return <Spinner label="Loading model validation…" />;
 
   const at = (reports: ScorerReport[], k: number) => reports.find((r) => r.k === k);
   const rule5 = at(data.rule, 5);
@@ -71,8 +71,8 @@ export function ValidationPanel() {
 function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="kpi">
-      <div className="kpi-value">{value}</div>
-      <div className="kpi-label">{label}</div>
+      <div className="kpi-v">{value}</div>
+      <div className="kpi-l">{label}</div>
       {sub && <div className="kpi-sub">{sub}</div>}
     </div>
   );

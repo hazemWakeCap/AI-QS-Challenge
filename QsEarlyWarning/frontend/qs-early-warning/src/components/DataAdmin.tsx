@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type EntityMeta, type EntityColumn, type EntityRow } from "../api/client";
+import { Spinner } from "./Loading";
 
 type FkOptions = Record<string, { id: number; label: string }[]>;
 
@@ -86,7 +87,7 @@ export function DataAdmin({ rev, onChanged }: { rev: number; onChanged: () => vo
     catch (e: unknown) { setErr(String((e as Error).message ?? e)); }
   }
 
-  if (!metas) return <div className="muted">Loading…</div>;
+  if (!metas) return <Spinner />;
 
   const fkLabel = (c: EntityColumn, val: unknown) => {
     const opt = c.fkEntity && fkOpts[c.fkEntity]?.find((o) => o.id === Number(val));
@@ -132,8 +133,8 @@ export function DataAdmin({ rev, onChanged }: { rev: number; onChanged: () => vo
               </label>
             ))}
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={save}>{editing === "new" ? "Create" : "Save"}</button>
-              <button className="btn-sm" style={{ background: "var(--surface-2)" }} onClick={() => setEditing(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={save}>{editing === "new" ? "Create" : "Save"}</button>
+              <button className="btn btn-sm btn-secondary" onClick={() => setEditing(null)}>Cancel</button>
             </div>
           </div>
         </div>
@@ -155,8 +156,8 @@ export function DataAdmin({ rev, onChanged }: { rev: number; onChanged: () => vo
                 {meta?.columns.map((c) => <td key={c.name} className={c.kind === "Numeric" || c.kind === "Int" || c.kind === "Bigint" ? "num" : ""}>{c.fkEntity ? fkLabel(c, row[c.name]) : row[c.name] == null ? "—" : String(row[c.name])}</td>)}
                 {meta && (meta.caps.update || meta.caps.delete) && (
                   <td style={{ whiteSpace: "nowrap" }}>
-                    {meta.caps.update && <button className="btn-sm" onClick={() => startEdit(row)}>Edit</button>}
-                    {meta.caps.delete && <button className="btn-sm" style={{ marginLeft: 6, background: "var(--danger)" }} onClick={() => del(row)}>Del</button>}
+                    {meta.caps.update && <button className="btn btn-sm btn-secondary" onClick={() => startEdit(row)}>Edit</button>}
+                    {meta.caps.delete && <button className="btn btn-sm btn-danger" style={{ marginLeft: 6 }} onClick={() => del(row)}>Del</button>}
                   </td>
                 )}
               </tr>

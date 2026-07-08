@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import {
   api, type Reconciliation, type Assumptions, type PeerBenchmarkResponse, type AssumptionFlag,
 } from "../api/client";
+import { money, millions } from "../format";
+import { Spinner, EmptyState } from "./Loading";
 
-const AED = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-const money = (v: number) => AED.format(Math.round(v)) + " AED";
-const millions = (v: number) => (v / 1e6).toFixed(1) + "M";
+// Stress test runs only on the estimate's owning project (Tower X), whose amounts are AED — so labels
+// are intentionally AED-fixed here. n0 = bare integer for dense table cells (no unit suffix).
+const n0 = (v: number) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Math.round(v));
 
 // Class-2 flag kind → short label + tone.
 const KIND: Record<string, { label: string; tone: string }> = {
@@ -30,14 +32,14 @@ export function StressTest({ rev }: { rev: number }) {
   }, [rev]);
 
   if (err) return <div className="error">{err}</div>;
-  if (!recon || !assume || !peers) return <div className="muted">Loading stress test…</div>;
+  if (!recon || !assume || !peers) return <Spinner label="Loading stress test…" />;
 
   if (!recon.available) {
     return (
       <div>
         <div className="panel-head"><span className="pill pill-blue">STRESS TEST</span></div>
-        <p className="muted">No estimate workbook for this project — the Estimate Assumption Stress Test runs
-          only on the estimate's owning project (Tower&nbsp;X).</p>
+        <EmptyState icon="⚖" title="No estimate workbook for this project"
+          hint="The Estimate Assumption Stress Test runs only on the estimate's owning project (Tower X)." />
       </div>
     );
   }
@@ -80,9 +82,9 @@ export function StressTest({ rev }: { rev: number }) {
               <tr key={it.scope + f.check + i}>
                 <td className="mono">{f.scope}{f.line ? ` · ${f.line}` : ""}</td>
                 <td>{f.check}</td>
-                <td className="num">{AED.format(Math.round(f.actual))}</td>
-                <td className="num">{AED.format(Math.round(f.expected))}</td>
-                <td className="num bad">{AED.format(Math.round(f.delta))}</td>
+                <td className="num">{n0(f.actual)}</td>
+                <td className="num">{n0(f.expected)}</td>
+                <td className="num bad">{n0(f.delta)}</td>
               </tr>
             )))}
           </tbody>

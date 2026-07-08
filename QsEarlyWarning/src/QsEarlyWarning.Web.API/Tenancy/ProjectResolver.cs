@@ -26,4 +26,8 @@ public sealed class ProjectResolver
         if (result is long id) { _cache[slug] = id; return id; }
         return null;
     }
+
+    /// <summary>Drop a slug from the cache. Call after a re-import (the importer purges + re-inserts the
+    /// project row, so the id changes) or a delete/rename, so the next resolve reflects the new state.</summary>
+    public void Invalidate(string slug) => _cache.TryRemove(slug, out _);
 }

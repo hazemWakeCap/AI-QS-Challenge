@@ -1,0 +1,19 @@
+# ── OS / editor cruft ──
+.DS_Store
+*.swp
+
+# ── local agent / tooling state (not part of the project) ──
+.claude/
+.wstack/
+.codeboarding/logs/
+
+# ── local screenshots / captures dropped at the repo root ──
+/qs-*.png
+
+# ── .NET build output ──
+bin/
+obj/
+
+# ── Node / frontend ──
+node_modules/
+dist/

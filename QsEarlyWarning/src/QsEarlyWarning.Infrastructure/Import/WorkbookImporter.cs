@@ -22,6 +22,10 @@ public sealed class WorkbookImporter : IWorkbookImporter
     public WorkbookImporter(IPanelLoader loader) => _loader = loader;
 
     public ReconciliationReport Import(string workbookPath, string connectionString, string projectSlug, string actor)
+        => Import(workbookPath, connectionString, projectSlug, actor,
+            new ProjectMeta($"Tower X ({projectSlug})", "AED", 1));
+
+    public ReconciliationReport Import(string workbookPath, string connectionString, string projectSlug, string actor, ProjectMeta meta)
     {
         var panel = _loader.Load(workbookPath);
         var sourceHash = FileSha256(workbookPath);
@@ -37,12 +41,12 @@ public sealed class WorkbookImporter : IWorkbookImporter
             Purge(conn, tx, projectSlug);
 
             var projectId = InsertReturning(conn, tx,
-                "INSERT INTO qs.projects (slug, name, reporting_currency) VALUES (@s, @n, 'AED') RETURNING id",
-                Txt("@s", projectSlug), Txt("@n", $"Tower X ({projectSlug})"));
+                "INSERT INTO qs.projects (slug, name, reporting_currency) VALUES (@s, @n, @cur) RETURNING id",
+                Txt("@s", projectSlug), Txt("@n", meta.Name), Txt("@cur", meta.Currency));
 
-            // Establish an owner membership (user 1) so the RLS-scoped read path has a member.
-            Exec(conn, tx, "INSERT INTO qs.project_memberships (project_id, user_id, role) VALUES (@p, 1, 'owner')",
-                Big("@p", projectId));
+            // Establish an owner membership so the RLS-scoped read path has a member.
+            Exec(conn, tx, "INSERT INTO qs.project_memberships (project_id, user_id, role) VALUES (@p, @owner, 'owner')",
+                Big("@p", projectId), Big("@owner", meta.OwnerUserId));
 
             var runId = InsertReturning(conn, tx,
                 "INSERT INTO qs.import_runs (project_id, source_file, source_hash, importer_version, actor, status) " +

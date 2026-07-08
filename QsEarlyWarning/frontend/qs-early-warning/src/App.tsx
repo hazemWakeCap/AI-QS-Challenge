@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, session, type Health, type Project } from "./api/client";
 import { EvmOverview } from "./components/EvmOverview";
 import { CostCentreGrid } from "./components/CostCentreGrid";
@@ -12,8 +12,10 @@ import { ForecastCone } from "./components/ForecastCone";
 import { ForecastBacktestPanel } from "./components/ForecastBacktest";
 import { StressTest } from "./components/StressTest";
 import { VarianceCard } from "./components/VarianceCard";
+import { ProjectsAdmin } from "./components/ProjectsAdmin";
+import { EmptyState } from "./components/Loading";
 
-type Tab = "overview" | "centres" | "capture" | "workflow" | "data" | "watchlist" | "forecast" | "stress" | "insight";
+type Tab = "overview" | "centres" | "capture" | "workflow" | "data" | "watchlist" | "forecast" | "stress" | "insight" | "projects";
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "EVM Overview" },
   { id: "centres", label: "Cost Centres" },
@@ -24,6 +26,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "forecast", label: "Forecast" },
   { id: "stress", label: "Stress Test" },
   { id: "insight", label: "Model & Copilot" },
+  { id: "projects", label: "Projects" },
 ];
 
 export default function App() {
@@ -38,26 +41,42 @@ export default function App() {
   const [varianceBcc, setVarianceBcc] = useState<string | null>(null);
 
   const project = projects.find((p) => p.slug === slug) ?? null;
+  // A project with no published estimate has no EVM data yet — its read endpoints would error, so we
+  // show an empty state and skip the data fetches until a workbook is imported.
+  const isEmpty = !!project && project.activeEstimateVersionId == null;
+  const cur = project?.reportingCurrency ?? "AED";
+
+  // Load (or reload) the project list; keep the current selection if it still exists, else fall back to
+  // the first project (or none). Passed to ProjectsAdmin so create/delete/rename refresh the switcher.
+  const loadProjects = useCallback(async () => {
+    try {
+      const ps = await api.projects();
+      setProjects(ps);
+      setSlug((cur) => {
+        const next = cur && ps.some((p) => p.slug === cur) ? cur : (ps[0]?.slug ?? "");
+        session.projectSlug = next;
+        return next;
+      });
+    } catch (e: unknown) { setErr(String((e as Error).message ?? e)); }
+  }, []);
 
   useEffect(() => {
     api.health().then(setHealth).catch(() => {});
-    api.projects().then((ps) => {
-      setProjects(ps);
-      if (ps[0]) { session.projectSlug = ps[0].slug; setSlug(ps[0].slug); }  // set before children fetch
-    }).catch((e) => setErr(String(e.message ?? e)));
-  }, []);
+    loadProjects();
+  }, [loadProjects]);
 
   // When the selected project changes: point the client at it, learn its period range.
   useEffect(() => {
     if (!slug) return;
     session.projectSlug = slug;
     setErr(null);
+    if (isEmpty) { setRange({ min: 1, forecast: 12 }); setRev((r) => r + 1); return; }  // no data → skip overview
     api.overview().then((o) => {
       setRange({ min: o.minPeriod, forecast: o.forecastPeriod });
       setPeriod(o.forecastPeriod);
       setRev((r) => r + 1);
     }).catch((e) => setErr(String(e.message ?? e)));
-  }, [slug]);
+  }, [slug, isEmpty]);
 
   const periods = Array.from({ length: range.forecast - range.min + 1 }, (_, i) => range.min + i);
   const refresh = () => setRev((r) => r + 1);
@@ -75,9 +94,11 @@ export default function App() {
       <div className="controls">
         <label>Project&nbsp;
           <select value={slug} onChange={(e) => { session.projectSlug = e.target.value; setSlug(e.target.value); }}>
+            {projects.length === 0 && <option value="">— none —</option>}
             {projects.map((p) => <option key={p.slug} value={p.slug}>{p.name} ({p.reportingCurrency})</option>)}
           </select>
         </label>
+        <button className="btn btn-sm btn-secondary" onClick={() => setTab("projects")}>+ New / Manage</button>
         <label>Period&nbsp;
           <select value={period} onChange={(e) => setPeriod(Number(e.target.value))}>
             {periods.map((p) => <option key={p} value={p}>Period {p}{p === range.forecast ? " — forecast" : ""}</option>)}
@@ -95,10 +116,18 @@ export default function App() {
       </nav>
 
       <div className="content">
-        {!slug ? <div className="muted">No project available for this user.</div> : (
+        {tab === "projects" ? (
+          <section className="card"><ProjectsAdmin projects={projects} onProjectsChanged={loadProjects} /></section>
+        ) : !slug ? (
+          <section className="card"><EmptyState icon="◇" title="No project yet"
+            hint="Open the Projects tab to create one or import a workbook." /></section>
+        ) : isEmpty && tab !== "data" ? (
+          <section className="card"><EmptyState icon="◷" title={`“${project?.name}” has no data yet`}
+            hint="Open Projects to import a workbook, or use Data Admin to add rows manually." /></section>
+        ) : (
           <>
-            {tab === "overview" && <section className="card"><EvmOverview period={period} rev={rev} /></section>}
-            {tab === "centres" && <section className="card"><CostCentreGrid period={period} rev={rev} /></section>}
+            {tab === "overview" && <section className="card"><EvmOverview period={period} rev={rev} currency={cur} /></section>}
+            {tab === "centres" && <section className="card"><CostCentreGrid period={period} rev={rev} currency={cur} /></section>}
             {tab === "capture" && <section className="card narrow"><CapturePanel period={period} rev={rev} onChanged={refresh} /></section>}
             {tab === "workflow" && <section className="card narrow"><PeriodsPanel rev={rev} onChanged={refresh} activeVersionId={project?.activeEstimateVersionId ?? null} /></section>}
             {tab === "data" && <section className="card"><DataAdmin rev={rev} onChanged={refresh} /></section>}
@@ -109,12 +138,12 @@ export default function App() {
                     <span className="muted small">Click a row to explain its variance (idea-5 attribution bridge).</span></div>
                   <Watchlist period={Math.max(period, 4)} k={10} onSelect={setVarianceBcc} />
                 </section>
-                {varianceBcc && <section className="card"><VarianceCard bcc={varianceBcc} period={Math.max(period, 4)} /></section>}
+                {varianceBcc && <section className="card"><VarianceCard bcc={varianceBcc} period={Math.max(period, 4)} currency={cur} /></section>}
               </div>
             )}
             {tab === "forecast" && (
               <div className="split">
-                <section className="card"><ForecastCone rev={rev} /></section>
+                <section className="card"><ForecastCone rev={rev} currency={cur} /></section>
                 <section className="card"><ForecastBacktestPanel rev={rev} /></section>
               </div>
             )}

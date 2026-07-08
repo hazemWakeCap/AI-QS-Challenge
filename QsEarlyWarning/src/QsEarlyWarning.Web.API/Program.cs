@@ -4,6 +4,7 @@ using QsEarlyWarning.Core.Registry;
 using QsEarlyWarning.Core.Scoring;
 using QsEarlyWarning.Domain.Estimate;
 using QsEarlyWarning.Infrastructure.Excel;
+using QsEarlyWarning.Infrastructure.Import;
 using QsEarlyWarning.Infrastructure.Postgres;
 using QsEarlyWarning.Web.API.Tenancy;
 
@@ -46,6 +47,12 @@ builder.Services.AddSingleton<IProjectSnapshotRegistry>(sp =>
 builder.Services.AddSingleton(new ProjectDirectory(connString));
 builder.Services.AddSingleton(new TenantWriteService(connString));
 builder.Services.AddSingleton(new QsEarlyWarning.Infrastructure.Crud.GenericCrudService(connString));
+
+// In-app project lifecycle (create / import / manage) — reuses the importer pipeline + bypass-role admin.
+builder.Services.AddSingleton<IWorkbookImporter>(sp => new WorkbookImporter(sp.GetRequiredService<IPanelLoader>()));
+builder.Services.AddSingleton(new ProjectAdminService(connString));
+builder.Services.AddSingleton(sp => new ProjectImportService(connString, sp.GetRequiredService<IWorkbookImporter>()));
+
 builder.Services.AddScoped<TenantContext>();
 
 // S2 copilot: Microsoft Agent Framework over Claude, or a disabled agent when no key is set.

@@ -21,6 +21,16 @@ async function post<T>(url: string, body?: unknown): Promise<T> {
 }
 async function send<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, { method, headers: headers(true), body: body !== undefined ? JSON.stringify(body) : undefined });
+  return parse<T>(res);
+}
+
+// multipart/form-data upload: the browser sets Content-Type (with the boundary), so we omit it here.
+async function postForm<T>(url: string, form: FormData): Promise<T> {
+  const res = await fetch(url, { method: "POST", headers: headers(false), body: form });
+  return parse<T>(res);
+}
+
+async function parse<T>(res: Response): Promise<T> {
   const text = await res.text();
   if (!res.ok) {
     // API errors are JSON like {"error":"…"}; surface that message when present.
@@ -34,6 +44,8 @@ async function send<T>(method: string, url: string, body?: unknown): Promise<T> 
 // ── types ──
 export interface Health { status: string; workbook: string; rowCount: number; centreCount: number; scorerVersion: string; featureSchemaVersion: string; forecastPeriod: number; }
 export interface Project { id: number; slug: string; name: string; reportingCurrency: string; activeEstimateVersionId: number | null; ledgerActive: boolean; }
+// Reconciliation summary returned by workbook import (create-from-workbook / re-import).
+export interface ImportSummary { passed: boolean; activated: boolean; costCentres: number; periods: number; facts: number; failureReason: string | null; publishViolations: string[]; }
 export interface EvmTotals { period: number; currency: string; bac: number; pv: number; ev: number; ac: number; cv: number; cpi: number | null; spi: number | null; eac: number; vac: number; pctBudgetConsumed: number | null; costCentres: number; amber: number; }
 export interface EvmTrendPoint { period: number; pv: number; ev: number; ac: number; cpi: number | null; spi: number | null; }
 export interface EvmOverview { projectSlug: string; period: number; minPeriod: number; forecastPeriod: number; totals: EvmTotals; trend: EvmTrendPoint[]; }
@@ -83,6 +95,20 @@ export interface VarianceBridge {
 export const api = {
   health: () => get<Health>("/api/v1/health"),
   projects: () => get<Project[]>("/api/v1/projects"),
+  // project lifecycle (add / manage)
+  createProject: (body: { name: string; slug: string; currency: string }) => post<Project>("/api/v1/projects", body),
+  importProject: (body: { name: string; slug: string; currency: string }, file: File) => {
+    const f = new FormData();
+    f.append("name", body.name); f.append("slug", body.slug); f.append("currency", body.currency); f.append("file", file);
+    return postForm<ImportSummary>("/api/v1/projects/import", f);
+  },
+  reimportProject: (slug: string, file: File) => {
+    const f = new FormData(); f.append("file", file);
+    return postForm<ImportSummary>(`/api/v1/projects/${encodeURIComponent(slug)}/import`, f);
+  },
+  updateProject: (slug: string, body: { name?: string; currency?: string }) =>
+    send<{ ok: boolean }>("PATCH", `/api/v1/projects/${encodeURIComponent(slug)}`, body),
+  deleteProject: (slug: string) => send<{ ok: boolean }>("DELETE", `/api/v1/projects/${encodeURIComponent(slug)}`),
   overview: (period?: number) => get<EvmOverview>(`/api/v1/overview${period ? `?period=${period}` : ""}`),
   costCentres: (period?: number) => get<CostCentreEvm[]>(`/api/v1/cost-centres${period ? `?period=${period}` : ""}`),
   periods: () => get<Period[]>("/api/v1/periods"),

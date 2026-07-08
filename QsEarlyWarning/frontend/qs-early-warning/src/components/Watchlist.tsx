@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type WatchlistResponse } from "../api/client";
+import { Spinner } from "./Loading";
 
 export function Watchlist({ period, k, onSelect }: { period: number; k: number; onSelect?: (bccId: string) => void }) {
   const [data, setData] = useState<WatchlistResponse | null>(null);
@@ -20,7 +21,7 @@ export function Watchlist({ period, k, onSelect }: { period: number; k: number; 
     };
   }, [period, k]);
 
-  if (loading && !data) return <div className="muted">Loading watchlist…</div>;
+  if (loading && !data) return <Spinner label="Loading watchlist…" />;
   if (error) return <div className="error">Could not load period {period}: {error}</div>;
   if (!data) return null;
 

@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
 import { api, type VarianceBridge } from "../api/client";
-
-const AED = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-const money = (v: number | null) => (v == null ? "—" : AED.format(Math.round(v)) + " AED");
+import { money as fmtMoney, ratio } from "../format";
+import { Spinner } from "./Loading";
 
 // Idea-5 variance-attribution card: the drill-down behind idea-1's watchlist. Two honest lanes (CV by
 // resource, monetary SV), a tie-out, and honesty markers (assumption badge + evidence-needed). CV is an
 // ATTRIBUTION, not a proven cause.
-export function VarianceCard({ bcc, period }: { bcc: string; period: number }) {
+export function VarianceCard({ bcc, period, currency = "AED" }: { bcc: string; period: number; currency?: string }) {
   const [d, setD] = useState<VarianceBridge | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const money = (v: number | null | undefined) => fmtMoney(v, currency);
 
   useEffect(() => {
     setD(null); setErr(null);
@@ -17,7 +17,7 @@ export function VarianceCard({ bcc, period }: { bcc: string; period: number }) {
   }, [bcc, period]);
 
   if (err) return <div className="error">{err}</div>;
-  if (!d) return <div className="muted">Loading variance for {bcc}…</div>;
+  if (!d) return <Spinner label={`Loading variance for ${bcc}…`} />;
 
   if (!d.available) {
     return (
@@ -43,7 +43,7 @@ export function VarianceCard({ bcc, period }: { bcc: string; period: number }) {
       {/* fact-first attribution line (cause = hypothesis) */}
       <div className={over ? "error" : "ok-msg"} style={{ marginBottom: 12 }}>
         <b>{verb} by {money(Math.abs(d.cvAed ?? 0))}</b> (CV). Schedule {Math.abs(d.svAed ?? 0) < 1 ? "on-plan" : (d.svAed! < 0 ? "behind" : "ahead")} (SV {money(d.svAed)}
-        {d.spi != null ? `, SPI ${d.spi.toFixed(3)}` : ""}).{" "}
+        {d.spi != null ? `, SPI ${ratio(d.spi)}` : ""}).{" "}
         {d.resourceBreakdownAvailable && d.dominantResourceType
           ? (d.dominantResourceType === "unexplained residual"
               ? <><b>Unexplained residual</b> dominates — the recorded AC splits don't sum to total AC.</>
@@ -87,7 +87,7 @@ export function VarianceCard({ bcc, period }: { bcc: string; period: number }) {
       )}
 
       <p className="muted small" style={{ marginTop: 10 }}>
-        Tie-out: {d.tiesOut ? "✓ Σ CVr + unexplained residual = CV, to the AED" : "⚠ does not tie out"}
+        Tie-out: {d.tiesOut ? `✓ Σ CVr + unexplained residual = CV, to the ${currency}` : "⚠ does not tie out"}
         {d.unexplainedResidual != null ? ` · unexplained residual ${money(d.unexplainedResidual)} (AC the four splits don't attribute)` : ""}.
       </p>
       {d.notes.map((n, i) => <p key={i} className="muted small">{n}</p>)}
@@ -111,17 +111,18 @@ function Waterfall({ d }: { d: VarianceBridge }) {
   if (Math.abs(residual) >= 0.5) steps.push({ label: "resid", delta: residual, kind: residual >= 0 ? "up" : "down" });
   steps.push({ label: "AC", delta: ac, kind: "total" });
 
-  const W = 520, H = 150, pad = 24, bw = Math.min(56, (W - 2 * pad) / steps.length - 8);
+  const W = 520, H = 164, pad = 24, topPad = 16, bw = Math.min(56, (W - 2 * pad) / steps.length - 8);
   const maxV = Math.max(pv, ev, ac, 1) * 1.1;
-  const y = (v: number) => H - pad - (v / maxV) * (H - 2 * pad);
+  const y = (v: number) => H - pad - (v / maxV) * (H - pad - topPad);
+  const compact = (v: number) => { const a = Math.abs(v); const s = v < 0 ? "−" : ""; return a >= 1e6 ? `${s}${(a / 1e6).toFixed(1)}M` : a >= 1e3 ? `${s}${Math.round(a / 1e3)}k` : `${s}${Math.round(a)}`; };
   let cum = 0;
   const bars = steps.map((s, i) => {
     const x = pad + i * ((W - 2 * pad) / steps.length);
     let top: number, bot: number;
     if (s.kind === "base" || s.kind === "total") { top = y(s.delta); bot = y(0); cum = s.delta; }
     else { const start = cum; cum += s.delta; top = y(Math.max(start, cum)); bot = y(Math.min(start, cum)); }
-    const fill = s.kind === "base" ? "var(--muted)" : s.kind === "total" ? "var(--accent)" : s.kind === "up" ? "var(--danger)" : "var(--forecast)";
-    return { x, top, h: Math.max(2, bot - top), fill, label: s.label, hi: s.hi };
+    const fill = s.kind === "base" ? "var(--muted)" : s.kind === "total" ? "var(--accent)" : s.kind === "up" ? "var(--bad)" : "var(--good)";
+    return { x, top, h: Math.max(2, bot - top), fill, label: s.label, val: compact(s.delta), hi: s.hi };
   });
 
   return (
@@ -130,6 +131,7 @@ function Waterfall({ d }: { d: VarianceBridge }) {
         <g key={i}>
           <rect x={b.x} y={b.top} width={bw} height={b.h} fill={b.fill}
                 stroke={b.hi ? "var(--text)" : "none"} strokeWidth={b.hi ? 2 : 0} rx={2} />
+          <text x={b.x + bw / 2} y={b.top - 4} className="cone-lbl" textAnchor="middle">{b.val}</text>
           <text x={b.x + bw / 2} y={H - pad + 12} className="cone-lbl" textAnchor="middle">{b.label}</text>
         </g>
       ))}
