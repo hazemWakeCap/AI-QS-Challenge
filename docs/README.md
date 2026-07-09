@@ -47,6 +47,16 @@ assumptions and reconciliation before award, drill into which resource an over-r
   deterministic engine's **three separated output classes** (reconciliation tie-out / cohort-gated
   assumption flags / retrospective peer benchmark), the load-bearing **Output-Norm divisor**, the
   leave-one-out + 5-peer-minimum guards, and the tie-out test suite that is the engine's credibility.
+- [Idea 4 — QS Copilot: How It Was Actually Built](15-idea-4-implementation.md) —
+  engineering reality for Feature 4: the **"tools compute, model narrates" code boundary**, the MAF
+  `ChatClientAgent` over Claude Sonnet 5, the 10 read-only tools with a `sources` provenance block, the
+  `sum(EV)/sum(AC)` and validated-vs-directional rules, the RLS-before-LLM tenancy boundary, and the
+  independent-ground-truth eval (21 offline tests + an opt-in live routing eval).
+- [Idea 5 — Variance Attribution Bridge: How It Was Actually Built](16-idea-5-implementation.md) —
+  engineering reality for Feature 5: the reframe away from a quantity-vs-rate split of CV, the **two
+  honest lanes** (cost/efficiency CV by resource + schedule SV), the additive **`Σ CV_r + residual == CV`
+  tie-out**, the estimate-share allocation with its assumption badge + evidence-needed field, the
+  `EP-`/live gates, and the watchlist click-through + copilot tool that consume it.
 
 ## How to read a feature doc
 
