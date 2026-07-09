@@ -53,6 +53,9 @@ export interface CostCentreEvm { bccId: string; discipline: string | null; packa
 export interface Period { id: number; period: number; periodStart: string; status: string; openedAt: string | null; closedAt: string | null; }
 export interface WatchlistRow { rank: number; bccId: string; discipline: string | null; packageCode: string; riskScore: number; cpi: number; gap: number; riskIndicators: string[]; }
 export interface WatchlistResponse { period: number; k: number; isForecast: boolean; artifactVersion: string; trainingCutoffPeriod: number; eligibleCount: number; rows: WatchlistRow[]; }
+// Proof / hindsight backtest — the watchlist graded against the actual next period
+export interface BacktestRow { rank: number; bccId: string; discipline: string | null; packageCode: string; riskScore: number; cpi: number; gap: number; riskIndicators: string[]; actualNextAlert: string; hit: boolean; }
+export interface BacktestResponse { period: number; nextPeriod: number; k: number; trainingCutoffPeriod: number; eligible: number; positives: number; hits: number; precisionAtK: number | null; rows: BacktestRow[]; originMin: number; originMax: number; ruleMacroPrecision: number | null; bestBaselineMacroPrecision: number | null; bestBaselineLabel: string | null; totalTransitions: number; provenance: string; }
 export interface CopilotTurn { role: "user" | "assistant"; text: string; }
 export interface CopilotSources { sheet: string | null; resolvedPeriod: number | null; filter: string | null; excludedCount: number | null; rowIds: string[]; }
 export interface CopilotEvidence { tool: string; detail: string; sources: CopilotSources | null; }
@@ -62,7 +65,11 @@ export interface ScorerReport { scorerLabel: string; k: number; macroPrecision: 
 export interface ValidationSummary { provenance: string; scorer: string; scorerVersion: string; featureSchemaVersion: string; evaluationOriginMin: number; evaluationOriginMax: number; foldCount: number; totalTransitions: number; rule: ScorerReport[]; cpiNative: ScorerReport[]; }
 export interface EntityColumn { name: string; kind: "Text" | "Numeric" | "Int" | "Bigint" | "Bool" | "Date"; insertable: boolean; updatable: boolean; required: boolean; fkEntity: string | null; enum: string[] | null; }
 export interface EntityCaps { list: boolean; get: boolean; create: boolean; update: boolean; delete: boolean; }
-export interface EntityMeta { key: string; display: string; table: string; naturalKey: string[]; caps: EntityCaps; columns: EntityColumn[]; }
+export interface EntityMeta { key: string; display: string; table: string; naturalKey: string[]; caps: EntityCaps;
+  // workbook grouping/lineage: group-level fields (group/groupLabel/groupOrder) are shared across a group and
+  // drive the sheet nav; sheetRef/blurb are per-entity lineage (may differ within a group — e.g. cost-deltas).
+  group: string; groupLabel: string; groupOrder: number; sheetRef: string | null; blurb: string; order: number;
+  columns: EntityColumn[]; }
 export type EntityRow = Record<string, unknown>;
 export interface ForecastListItem { bccId: string; discipline: string | null; progressPct: number; trust: string; nextP50: number; nextP10: number | null; nextP90: number | null; nextAvailable: boolean; }
 export interface HorizonBand { horizon: number; p50: number; p10: number | null; p90: number | null; available: boolean; }
@@ -119,6 +126,7 @@ export const api = {
   publishVersion: (versionId: number) => post(`/api/v1/estimate-versions/${versionId}/publish`),
   validationSummary: () => get<ValidationSummary>("/api/v1/validation-summary"),
   watchlist: (period: number, k: number) => get<WatchlistResponse>(`/api/v1/watchlist?period=${period}&k=${k}`),
+  watchlistBacktest: (period: number, k: number) => get<BacktestResponse>(`/api/v1/watchlist/backtest?period=${period}&k=${k}`),
   askCopilot: (question: string, history: CopilotTurn[]) =>
     post<CopilotAskResponse>("/api/v1/copilot/ask", { question, history }),
   // generic CRUD

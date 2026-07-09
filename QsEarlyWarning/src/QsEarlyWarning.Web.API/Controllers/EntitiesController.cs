@@ -30,6 +30,8 @@ public sealed class EntitiesController : ControllerBase
     public ActionResult<object> Registry() => Ok(EntityRegistry.All.Select(e => new
     {
         e.Key, e.Display, e.Table, naturalKey = e.NaturalKey, caps = e.Caps,
+        // workbook grouping/lineage for the sheet-first Data-Admin nav (see EntityDescriptor)
+        e.Group, e.GroupLabel, e.GroupOrder, e.SheetRef, e.Blurb, e.Order,
         columns = e.Columns.Select(c => new
         {
             c.Name, kind = c.Kind.ToString(), c.Insertable, c.Updatable, c.Required, fkEntity = c.FkEntity, @enum = c.Enum,

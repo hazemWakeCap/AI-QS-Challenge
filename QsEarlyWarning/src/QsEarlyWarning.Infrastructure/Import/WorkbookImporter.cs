@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using Npgsql;
 using NpgsqlTypes;
 using QsEarlyWarning.Domain.Entities;
+using QsEarlyWarning.Domain.Estimate;
 using QsEarlyWarning.Infrastructure.Excel;
 
 namespace QsEarlyWarning.Infrastructure.Import;
@@ -18,8 +19,13 @@ public sealed class WorkbookImporter : IWorkbookImporter
 {
     private const string ImporterVersion = "phase1-0.1";
     private readonly IPanelLoader _loader;
+    private readonly IEstimateWorkbookReader _estimate;
 
-    public WorkbookImporter(IPanelLoader loader) => _loader = loader;
+    public WorkbookImporter(IPanelLoader loader, IEstimateWorkbookReader estimate)
+    {
+        _loader = loader;
+        _estimate = estimate;
+    }
 
     public ReconciliationReport Import(string workbookPath, string connectionString, string projectSlug, string actor)
         => Import(workbookPath, connectionString, projectSlug, actor,
@@ -113,6 +119,12 @@ public sealed class WorkbookImporter : IWorkbookImporter
                     insPlan.ExecuteNonQuery();
                 }
             }
+
+            // ── estimate graph (sheets 1-4): persist into the six estimate tables while the version is
+            //    still 'draft' (immutability trigger allows it) and before Validate (boq_rollup check).
+            //    Best-effort: parse failure / missing sheets degrade to a skipped block, never a failed
+            //    import. See PersistEstimate for the pre-validation + savepoint model. ──
+            PersistEstimate(conn, tx, workbookPath, projectId, versionId, ccId.Count > 0, report);
 
             // ── validate the estimate graph before activating (Phase-0 publish rules) ──
             var violations = Validate(conn, tx, projectId, versionId);
@@ -317,16 +329,182 @@ public sealed class WorkbookImporter : IWorkbookImporter
         }
         if (pid is null) return;
 
-        // child → parent order (all FKs are ON DELETE RESTRICT)
+        // child → parent order (all FKs are ON DELETE RESTRICT). NOTE: cost_centres must be deleted BEFORE
+        // estimate_packages — cost_centres.estimate_package_id → estimate_packages is ON DELETE RESTRICT, and
+        // the importer now populates that link, so the old order (packages before centres) would fail on
+        // re-import. cost_centres still comes after everything that references IT (periods/baselines/plan).
         foreach (var t in new[] {
             "import_runs", "cost_centre_periods", "period_cost_deltas", "cost_centre_plan_periods",
             "cost_centre_baselines", "estimate_resource_lines", "boq_norm_mappings", "boq_items",
-            "estimate_packages", "norm_materials", "norms", "cost_centres" })
+            "cost_centres", "estimate_packages", "norm_materials", "norms" })
             Exec(conn, tx, $"DELETE FROM qs.{t} WHERE project_id = @p", Big("@p", pid.Value));
         Exec(conn, tx, "UPDATE qs.projects SET active_estimate_version_id = NULL WHERE id = @p", Big("@p", pid.Value));
         foreach (var t in new[] { "estimate_versions", "reporting_periods", "project_memberships" })
             Exec(conn, tx, $"DELETE FROM qs.{t} WHERE project_id = @p", Big("@p", pid.Value));
         Exec(conn, tx, "DELETE FROM qs.projects WHERE id = @p", Big("@p", pid.Value));
+    }
+
+    // ── estimate graph (sheets 1-4) persistence ─────────────────────────────────────────────────────
+    // Runs inside the outer import transaction while the version is still 'draft' and before Validate.
+    // Best-effort: a missing/unreadable estimate workbook is skipped (never fails the import); expected
+    // bad rows are filtered in C# *before* any INSERT (a constraint violation would poison the whole tx);
+    // a SAVEPOINT backstops any unexpected DB error so the historical-data load still commits.
+    private void PersistEstimate(NpgsqlConnection conn, NpgsqlTransaction tx, string workbookPath,
+        long projectId, long versionId, bool hasCostCentres, ReconciliationReport report)
+    {
+        EstimateModel model;
+        try { model = _estimate.Read(workbookPath); }
+        catch (Exception ex)
+        {
+            report.EstimateNotes.Add($"estimate sheets not persisted (unreadable/missing): {ex.Message}");
+            return;
+        }
+        if (model.BoqLines.Count == 0 && model.Norms.Count == 0 &&
+            model.ResourceLines.Count == 0 && model.Mappings.Count == 0)
+        {
+            report.EstimateNotes.Add("estimate sheets parsed empty; nothing persisted");
+            return;
+        }
+
+        Exec(conn, tx, "SAVEPOINT est_graph");
+        try
+        {
+            PersistEstimateCore(conn, tx, model, projectId, versionId, hasCostCentres, report);
+            Exec(conn, tx, "RELEASE SAVEPOINT est_graph");
+        }
+        catch (Exception ex)
+        {
+            // Unexpected error: undo only the estimate block so Validate/publish/facts still succeed.
+            Exec(conn, tx, "ROLLBACK TO SAVEPOINT est_graph");
+            report.EstimateNorms = report.EstimatePackages = report.EstimateBoqItems = report.EstimateResourceLines = 0;
+            report.EstimateNotes.Add($"estimate persistence rolled back after unexpected error: {ex.Message}");
+        }
+    }
+
+    private static void PersistEstimateCore(NpgsqlConnection conn, NpgsqlTransaction tx, EstimateModel model,
+        long projectId, long versionId, bool hasCostCentres, ReconciliationReport report)
+    {
+        // 1. norms (one per distinct code, first-wins to match EstimateModel.NormByCode)
+        var normIdByCode = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var n in model.NormByCode.Values)
+            normIdByCode[n.NormCode] = InsertReturning(conn, tx,
+                "INSERT INTO qs.norms (project_id, estimate_version_id, norm_code, description, unit, output_norm) " +
+                "VALUES (@p, @v, @code, @desc, @unit, @on) RETURNING id",
+                Big("@p", projectId), Big("@v", versionId), Txt("@code", n.NormCode),
+                Txt("@desc", n.Notes), Txt("@unit", n.Unit), NumN("@on", n.OutputNorm));
+        report.EstimateNorms = normIdByCode.Count;
+
+        // 2. norm_materials — synthetic MAT1/MAT2 codes from the two per-UoW material qty columns
+        //    (sheet 2 has quantities but no material codes; real material lines live in resource_lines).
+        foreach (var n in model.NormByCode.Values)
+        {
+            if (!normIdByCode.TryGetValue(n.NormCode, out var nid)) continue;
+            foreach (var (code, qty) in new[] { ("MAT1", n.Mat1QtyPerUoW), ("MAT2", n.Mat2QtyPerUoW) })
+            {
+                if (qty is null) continue;
+                Exec(conn, tx,
+                    "INSERT INTO qs.norm_materials (project_id, norm_id, material_code, qty_per_unit) " +
+                    "VALUES (@p, @n, @code, @q)",
+                    Big("@p", projectId), Big("@n", nid), Txt("@code", code), NumN("@q", qty));
+            }
+        }
+
+        // 3. estimate_packages — distinct codes seen on mappings + resource lines
+        var pkgIdByCode = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var pkgCodes = model.Mappings.Select(m => m.EstimatePackage)
+            .Concat(model.ResourceLines.Select(r => r.Package))
+            .Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var code in pkgCodes)
+            pkgIdByCode[code] = InsertReturning(conn, tx,
+                "INSERT INTO qs.estimate_packages (project_id, estimate_version_id, code, name) " +
+                "VALUES (@p, @v, @code, NULL) RETURNING id",
+                Big("@p", projectId), Big("@v", versionId), Txt("@code", code));
+        report.EstimatePackages = pkgIdByCode.Count;
+
+        // 4. Pre-compute per-item resource-line sums (mirrors the GENERATED resource_cost_amount and the
+        //    SQL rollup), keyed by the composite (Sec, ItemRef) — the DB natural key.
+        var itemsWithLines = new HashSet<(string, string)>();
+        var lineSum = new Dictionary<(string, string), decimal>();
+        foreach (var rl in model.ResourceLines)
+        {
+            var key = (rl.Sec ?? "", rl.ItemRef);
+            itemsWithLines.Add(key);
+            lineSum[key] = lineSum.GetValueOrDefault(key) + EstimateMapping.LineCost(rl.TotalResourceQty, rl.UnitRate);
+        }
+
+        // 5. boq_items — total_amount is the resource-cost ROLLUP the DB defines it to be. The schema
+        //    ("resource lines roll up to this") and fn_validate_publish's boq_rollup_mismatch require
+        //    total_amount == Σ resource_cost_amount within greatest(1.00, 0.5%). The workbook's TOTAL Amount
+        //    includes margin + contingency, so it is always LARGER than the direct resource-cost rollup —
+        //    persisting it would FAIL publish validation and roll back the import. So we store the rollup
+        //    itself (items with no resource lines → NULL: nothing to roll up). Decided BEFORE the INSERT so
+        //    the value is already correct; no post-insert mutation. The workbook's margin-inclusive contract
+        //    total has no home under the no-schema-change scope (see plan §Scope decisions).
+        var boqIdByRef = new Dictionary<(string, string), long>();
+        int boqNoLines = 0;
+        foreach (var b in model.BoqLines)
+        {
+            var key = (b.Sec ?? "", b.ItemRef);
+            if (boqIdByRef.ContainsKey(key)) continue;   // first-wins on the (rare) duplicate composite
+            long? normId = b.NormRef is string nr && normIdByCode.TryGetValue(nr, out var nrid) ? nrid : null;
+
+            object total;
+            if (itemsWithLines.Contains(key)) total = lineSum.GetValueOrDefault(key);   // rollup ties by construction
+            else { total = DBNull.Value; boqNoLines++; }
+
+            boqIdByRef[key] = InsertReturning(conn, tx,
+                "INSERT INTO qs.boq_items (project_id, estimate_version_id, boq_sec, item_ref, description, unit, quantity, norm_id, total_amount) " +
+                "VALUES (@p, @v, @sec, @item, @desc, @unit, @qty, @norm, @total) RETURNING id",
+                Big("@p", projectId), Big("@v", versionId), Txt("@sec", b.Sec ?? ""), Txt("@item", b.ItemRef),
+                Txt("@desc", b.Description), Txt("@unit", b.Unit), NumN("@qty", b.Quantity),
+                BigN("@norm", normId), new NpgsqlParameter("@total", NpgsqlDbType.Numeric) { Value = total });
+        }
+        report.EstimateBoqItems = boqIdByRef.Count;
+        if (boqNoLines > 0) report.EstimateNotes.Add(
+            $"{boqNoLines} BOQ item(s) had no resource lines → total_amount NULL (no rollup source)");
+
+        // 6. boq_norm_mappings — emit only when all three FKs resolve (pre-validated; never a dangling FK)
+        int mapSkipped = 0;
+        foreach (var m in model.Mappings)
+        {
+            if (!boqIdByRef.TryGetValue((m.Sec ?? "", m.ItemRef), out var boqId)) { mapSkipped++; continue; }
+            if (m.NormCode is not string nc || !normIdByCode.TryGetValue(nc, out var nId)) { mapSkipped++; continue; }
+            if (m.EstimatePackage is not string pc || !pkgIdByCode.TryGetValue(pc.Trim(), out var pId)) { mapSkipped++; continue; }
+            Exec(conn, tx,
+                "INSERT INTO qs.boq_norm_mappings (project_id, estimate_version_id, boq_item_id, norm_id, estimate_package_id) " +
+                "VALUES (@p, @v, @b, @n, @pk)",
+                Big("@p", projectId), Big("@v", versionId), Big("@b", boqId), Big("@n", nId), Big("@pk", pId));
+        }
+        if (mapSkipped > 0) report.EstimateNotes.Add($"{mapSkipped} BOQ→norm mapping(s) skipped (unresolved item/norm/package)");
+
+        // 7. estimate_resource_lines — need boq_item_id + a valid rtype (norm_id nullable). resource_cost_amount
+        //    is GENERATED, never inserted. quantity = Total Resource Qty (divisor already applied in workbook).
+        int rlCount = 0, rlSkipped = 0;
+        foreach (var rl in model.ResourceLines)
+        {
+            if (!boqIdByRef.TryGetValue((rl.Sec ?? "", rl.ItemRef), out var boqId)) { rlSkipped++; continue; }
+            if (EstimateMapping.NormalizeRtype(rl.ResourceType) is not string rtype) { rlSkipped++; continue; }
+            long? nId = rl.NormCode is string nc2 && normIdByCode.TryGetValue(nc2, out var n3) ? n3 : null;
+            Exec(conn, tx,
+                "INSERT INTO qs.estimate_resource_lines (project_id, estimate_version_id, boq_item_id, norm_id, rtype, quantity, unit_rate_amount) " +
+                "VALUES (@p, @v, @b, @n, @rt, @q, @rate)",
+                Big("@p", projectId), Big("@v", versionId), Big("@b", boqId), BigN("@n", nId),
+                Txt("@rt", rtype), NumN("@q", rl.TotalResourceQty), NumN("@rate", rl.UnitRate));
+            rlCount++;
+        }
+        report.EstimateResourceLines = rlCount;
+        if (rlSkipped > 0) report.EstimateNotes.Add($"{rlSkipped} resource line(s) skipped (unresolved BOQ item or unknown rtype)");
+
+        // 8. Link cost centres to their estimate package by the package_code sheet-9 already carries.
+        //    Needs both cost_centres (step 5 of the import) and estimate_packages (step 3 here) to exist.
+        if (hasCostCentres)
+            Exec(conn, tx,
+                "UPDATE qs.cost_centres cc SET estimate_package_id = ep.id " +
+                "FROM qs.estimate_packages ep " +
+                "WHERE ep.project_id = cc.project_id AND ep.estimate_version_id = @v " +
+                "AND ep.code = cc.package_code AND cc.project_id = @p",
+                Big("@v", versionId), Big("@p", projectId));
     }
 
     // ── small helpers ──
@@ -379,8 +557,10 @@ public sealed class WorkbookImporter : IWorkbookImporter
     private static decimal? D(NpgsqlDataReader rd, int i) => rd.IsDBNull(i) ? null : rd.GetDecimal(i);
 
     private static NpgsqlParameter Num(string n, double v) => new(n, NpgsqlDbType.Numeric) { Value = Convert.ToDecimal(v) };
+    private static NpgsqlParameter NumN(string n, double? v) => new(n, NpgsqlDbType.Numeric) { Value = NumV(v) };
     private static NpgsqlParameter Txt(string n, string? v) => new(n, NpgsqlDbType.Text) { Value = (object?)v ?? DBNull.Value };
     private static NpgsqlParameter Big(string n, long v) => new(n, NpgsqlDbType.Bigint) { Value = v };
+    private static NpgsqlParameter BigN(string n, long? v) => new(n, NpgsqlDbType.Bigint) { Value = (object?)v ?? DBNull.Value };
     private static NpgsqlParameter Intg(string n, int v) => new(n, NpgsqlDbType.Integer) { Value = v };
     private static NpgsqlParameter Dt(string n, DateTime v) => new(n, NpgsqlDbType.Date) { Value = v };
 

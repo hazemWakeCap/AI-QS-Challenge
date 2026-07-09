@@ -5,6 +5,7 @@ import { CostCentreGrid } from "./components/CostCentreGrid";
 import { CapturePanel } from "./components/CapturePanel";
 import { PeriodsPanel } from "./components/PeriodsPanel";
 import { Watchlist } from "./components/Watchlist";
+import { Proof } from "./components/Proof";
 import { ValidationPanel } from "./components/ValidationPanel";
 import { Copilot } from "./components/Copilot";
 import { DataAdmin } from "./components/DataAdmin";
@@ -15,7 +16,7 @@ import { VarianceCard } from "./components/VarianceCard";
 import { ProjectsAdmin } from "./components/ProjectsAdmin";
 import { EmptyState } from "./components/Loading";
 
-type Tab = "overview" | "centres" | "capture" | "workflow" | "data" | "watchlist" | "forecast" | "stress" | "insight" | "projects";
+type Tab = "overview" | "centres" | "capture" | "workflow" | "data" | "watchlist" | "proof" | "forecast" | "stress" | "insight" | "projects";
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "EVM Overview" },
   { id: "centres", label: "Cost Centres" },
@@ -23,6 +24,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "workflow", label: "Periods & Estimate" },
   { id: "data", label: "Data Admin" },
   { id: "watchlist", label: "Watchlist" },
+  { id: "proof", label: "Proof" },
   { id: "forecast", label: "Forecast" },
   { id: "stress", label: "Stress Test" },
   { id: "insight", label: "Model & Copilot" },
@@ -141,6 +143,7 @@ export default function App() {
                 {varianceBcc && <section className="card"><VarianceCard bcc={varianceBcc} period={Math.max(period, 4)} currency={cur} /></section>}
               </div>
             )}
+            {tab === "proof" && <section className="card proof-card"><Proof range={range} /></section>}
             {tab === "forecast" && (
               <div className="split">
                 <section className="card"><ForecastCone rev={rev} currency={cur} /></section>

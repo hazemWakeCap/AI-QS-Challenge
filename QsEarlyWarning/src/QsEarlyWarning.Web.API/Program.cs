@@ -1,5 +1,6 @@
 using QsEarlyWarning.Agent;
 using QsEarlyWarning.Core;
+using QsEarlyWarning.Core.Evaluation;
 using QsEarlyWarning.Core.Registry;
 using QsEarlyWarning.Core.Scoring;
 using QsEarlyWarning.Domain.Estimate;
@@ -21,6 +22,7 @@ var workbookPath = builder.Configuration["Data:WorkbookPath"] ?? LocateWorkbook(
 
 builder.Services.AddSingleton<IPanelLoader, ExcelPanelLoader>();
 builder.Services.AddSingleton<WatchlistScoringService>();
+builder.Services.AddSingleton<WatchlistBacktestService>();
 // Load + train once at startup (fails loud if the workbook is invalid). Still backs the copilot /
 // health while those move to live data in a later phase.
 builder.Services.AddSingleton<IModelProvider>(sp =>
@@ -49,7 +51,9 @@ builder.Services.AddSingleton(new TenantWriteService(connString));
 builder.Services.AddSingleton(new QsEarlyWarning.Infrastructure.Crud.GenericCrudService(connString));
 
 // In-app project lifecycle (create / import / manage) — reuses the importer pipeline + bypass-role admin.
-builder.Services.AddSingleton<IWorkbookImporter>(sp => new WorkbookImporter(sp.GetRequiredService<IPanelLoader>()));
+builder.Services.AddSingleton<IEstimateWorkbookReader>(new EstimateWorkbookReader());
+builder.Services.AddSingleton<IWorkbookImporter>(sp =>
+    new WorkbookImporter(sp.GetRequiredService<IPanelLoader>(), sp.GetRequiredService<IEstimateWorkbookReader>()));
 builder.Services.AddSingleton(new ProjectAdminService(connString));
 builder.Services.AddSingleton(sp => new ProjectImportService(connString, sp.GetRequiredService<IWorkbookImporter>()));
 

@@ -28,7 +28,7 @@ if (!File.Exists(workbook)) { Console.Error.WriteLine($"Workbook not found: {wor
 
 Console.WriteLine($"Importing '{workbook}' → {slug}  (db: {Redact(cs)})");
 ReconciliationReport report;
-try { report = new WorkbookImporter(new ExcelPanelLoader()).Import(workbook, cs, slug, actor); }
+try { report = new WorkbookImporter(new ExcelPanelLoader(), new EstimateWorkbookReader()).Import(workbook, cs, slug, actor); }
 catch (Exception ex) { Console.Error.WriteLine($"Import failed: {ex.Message}"); return 3; }
 
 Console.WriteLine();

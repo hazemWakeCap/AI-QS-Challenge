@@ -20,4 +20,9 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- the DB-backed import test drives the real WorkbookImporter (Infrastructure) against a container -->
+    <ProjectReference Include="..\..\src\QsEarlyWarning.Infrastructure\QsEarlyWarning.Infrastructure.csproj" />
+  </ItemGroup>
+
 </Project>

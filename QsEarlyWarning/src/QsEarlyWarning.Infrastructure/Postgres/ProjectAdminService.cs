@@ -108,11 +108,13 @@ public sealed class ProjectAdminService
         }
         if (pid is null) { await tx.RollbackAsync(ct); return false; }
 
-        // child → parent order (all FKs are ON DELETE RESTRICT) — same list as WorkbookImporter.Purge.
+        // child → parent order (all FKs are ON DELETE RESTRICT) — same list/order as WorkbookImporter.Purge.
+        // cost_centres MUST come before estimate_packages: cost_centres.estimate_package_id → estimate_packages
+        // is ON DELETE RESTRICT and the importer now populates that link, so packages-before-centres would fail.
         foreach (var t in new[] {
             "import_runs", "cost_centre_periods", "period_cost_deltas", "cost_centre_plan_periods",
             "cost_centre_baselines", "estimate_resource_lines", "boq_norm_mappings", "boq_items",
-            "estimate_packages", "norm_materials", "norms", "cost_centres" })
+            "cost_centres", "estimate_packages", "norm_materials", "norms" })
             await ExecPidAsync(conn, tx, $"DELETE FROM qs.{t} WHERE project_id = @p", pid.Value, ct);
         await ExecPidAsync(conn, tx, "UPDATE qs.projects SET active_estimate_version_id = NULL WHERE id = @p", pid.Value, ct);
         foreach (var t in new[] { "estimate_versions", "reporting_periods", "project_memberships" })

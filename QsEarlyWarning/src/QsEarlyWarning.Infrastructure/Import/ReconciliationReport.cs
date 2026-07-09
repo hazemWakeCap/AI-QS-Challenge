@@ -44,6 +44,15 @@ public sealed class ReconciliationReport
     public int SourceAnomalies { get; set; }
     public readonly List<string> SourceAnomalyExamples = new();
 
+    /// <summary>Estimate-graph persistence (sheets 1-4): row counts written to the six estimate tables,
+    /// plus best-effort skip/null notes. All zero + empty when the workbook has no estimate sheets or the
+    /// block was rolled back. Does not affect <see cref="Passed"/> — persistence is best-effort.</summary>
+    public int EstimateNorms { get; set; }
+    public int EstimatePackages { get; set; }
+    public int EstimateBoqItems { get; set; }
+    public int EstimateResourceLines { get; set; }
+    public readonly List<string> EstimateNotes = new();
+
     /// <summary>Pass iff activation succeeded and every numeric field + alert matched within tolerance.</summary>
     public bool Passed =>
         Activated && FailureReason is null
@@ -97,6 +106,12 @@ public sealed class ReconciliationReport
             sb.AppendLine("  EV/PV contradict Actual%×BAC / Plan%×BAC (source errors, not derivation gaps):");
             foreach (var w in SourceAnomalyExamples.Take(5)) sb.AppendLine($"    {w}");
         }
+
+        sb.AppendLine();
+        sb.AppendLine($"  estimate graph persisted (sheets 1-4): norms={EstimateNorms} packages={EstimatePackages} " +
+            $"boq_items={EstimateBoqItems} resource_lines={EstimateResourceLines}");
+        foreach (var n in EstimateNotes.Take(5)) sb.AppendLine($"    note: {n}");
+        if (EstimateNotes.Count > 5) sb.AppendLine($"    (+{EstimateNotes.Count - 5} more notes)");
 
         sb.AppendLine("════════════════════════════════════════════════════════════════════");
         sb.AppendLine(Passed

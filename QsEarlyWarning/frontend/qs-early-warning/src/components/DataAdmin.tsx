@@ -4,6 +4,28 @@ import { Spinner } from "./Loading";
 
 type FkOptions = Record<string, { id: number; label: string }[]>;
 
+// A workbook "sheet" group: the primary Data-Admin nav unit. `sheetRef` is the *representative*
+// (first-ordered) member's lineage — used for the tab eyebrow and the System dim — while each
+// table keeps its own per-entity `sheetRef` for the breadcrumb (so cost-deltas ≠ its sheet-9 mates).
+type SheetGroup = { key: string; label: string; order: number; sheetRef: string | null; tables: EntityMeta[] };
+
+/** Group entities by `group`, sort tables by `order` and groups by `groupOrder` (never array position,
+ *  which starts with estimate-versions). The representative sheetRef is the first-ordered member's. */
+function orderedGroups(metas: EntityMeta[]): SheetGroup[] {
+  const byKey = new Map<string, SheetGroup>();
+  for (const m of metas) {
+    let g = byKey.get(m.group);
+    if (!g) { g = { key: m.group, label: m.groupLabel, order: m.groupOrder, sheetRef: null, tables: [] }; byKey.set(m.group, g); }
+    g.tables.push(m);
+  }
+  const groups = [...byKey.values()];
+  for (const g of groups) { g.tables.sort((a, b) => a.order - b.order); g.sheetRef = g.tables[0]?.sheetRef ?? null; }
+  groups.sort((a, b) => a.order - b.order);
+  return groups;
+}
+
+const isReadOnly = (m: EntityMeta) => !m.caps.create && !m.caps.update && !m.caps.delete;
+
 export function DataAdmin({ rev, onChanged }: { rev: number; onChanged: () => void }) {
   const [metas, setMetas] = useState<EntityMeta[] | null>(null);
   const [selKey, setSelKey] = useState<string>("");
@@ -15,9 +37,13 @@ export function DataAdmin({ rev, onChanged }: { rev: number; onChanged: () => vo
   const [msg, setMsg] = useState<string | null>(null);
 
   const meta = metas?.find((m) => m.key === selKey) ?? null;
+  const groups = metas ? orderedGroups(metas) : [];
+  const selGroup = groups.find((g) => g.tables.some((t) => t.key === selKey)) ?? null;
 
   useEffect(() => {
-    api.entities().then((m) => { setMetas(m); setSelKey((k) => k || m[0]?.key || ""); }).catch((e) => setErr(String(e.message ?? e)));
+    // default to the first table of the first workbook group (boq-items), NOT the array's first
+    // entry (estimate-versions) — so the QS lands on their sheets, not the engine tables.
+    api.entities().then((m) => { setMetas(m); setSelKey((k) => k || orderedGroups(m)[0]?.tables[0]?.key || ""); }).catch((e) => setErr(String(e.message ?? e)));
   }, []);
 
   async function loadRows(m: EntityMeta) {
@@ -96,14 +122,50 @@ export function DataAdmin({ rev, onChanged }: { rev: number; onChanged: () => vo
 
   return (
     <div>
-      <div className="panel-head">
-        <span className="pill pill-blue">DATA ADMIN</span>
-        <select value={selKey} onChange={(e) => setSelKey(e.target.value)}>
-          {metas.map((m) => <option key={m.key} value={m.key}>{m.display}</option>)}
-        </select>
-        {meta?.caps.create && <button className="btn btn-sm btn-primary" onClick={startAdd}>+ Add</button>}
-        <span className="muted small" style={{ marginLeft: "auto" }}>{rows?.length ?? 0} rows{meta && !meta.caps.create ? " · read-only" : ""}</span>
-      </div>
+      <div className="panel-head"><span className="pill pill-blue">DATA ADMIN</span>
+        <span className="muted small">Browse the project data by workbook sheet</span></div>
+
+      {/* primary nav: one tab per workbook "sheet", ordered by groupOrder (System last, dimmed) */}
+      <nav className="sheet-tabs">
+        {groups.map((g) => {
+          const active = g.key === selGroup?.key;
+          const dim = g.sheetRef === null;   // representative sheetless → System & Import
+          return (
+            <button key={g.key} className={`tab sheet-tab${active ? " active" : ""}${dim ? " sheet-tab-system" : ""}`}
+              onClick={() => setSelKey(g.tables[0].key)}>
+              {g.sheetRef && <span className="code mono">{g.sheetRef}</span>}
+              <span>{g.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* secondary nav: table chips — only when the selected group has >1 table */}
+      {selGroup && selGroup.tables.length > 1 && (
+        <div className="chip-row">
+          {selGroup.tables.map((t) => (
+            <button key={t.key} className={`chip chip-btn${t.key === selKey ? " active" : ""}`}
+              onClick={() => setSelKey(t.key)}>{t.display}</button>
+          ))}
+        </div>
+      )}
+
+      {/* selected-table header: per-entity lineage breadcrumb + blurb + read-only signal + row count */}
+      {meta && (
+        <div className="data-admin-head">
+          <div className="lineage">
+            {meta.sheetRef
+              ? <><span className="code mono">{meta.sheetRef}</span><span className="crumb-sep">▸</span><b>{meta.display}</b></>
+              : <><b>{meta.display}</b><span className="pill pill-muted">no source sheet</span></>}
+            {isReadOnly(meta) && <span className="pill pill-muted">read-only</span>}
+          </div>
+          <div className="head-actions">
+            {meta.caps.create && <button className="btn btn-sm btn-primary" onClick={startAdd}>+ Add</button>}
+            <span className="muted small">{rows?.length ?? 0} rows</span>
+          </div>
+          {meta.blurb && <div className="blurb muted small">{meta.blurb}</div>}
+        </div>
+      )}
 
       {err && <div className="error">{err}</div>}
       {msg && <div className="ok-msg">{msg}</div>}

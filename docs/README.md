@@ -31,6 +31,23 @@ assumptions and reconciliation before award, drill into which resource an over-r
 | 10 | Data Administration | *Governed CRUD over the underlying tables.* | [10-data-administration.md](10-data-administration.md) |
 | 11 | Multi-Tenant Security | *How is each project's data isolated per user?* | [11-multi-tenant-security.md](11-multi-tenant-security.md) |
 
+### Deep dives
+
+- [Idea 1 — Early-Warning Classifier: How It Was Actually Built](12-idea-1-implementation.md) —
+  engineering reality for Feature 1: spec→shipped departures, the frozen `RuleRiskScore@v1`, a
+  step-by-step **math walkthrough** (gap, score, fitting, precision@k) with a worked example, the
+  leakage-safe rolling-origin training, and the three ways a QS uses it (tab, API, copilot).
+- [Idea 2 — Incremental-Spend Forecaster: How It Was Actually Built](13-idea-2-implementation.md) —
+  engineering reality for Feature 2: the reframe from final-cost EAC to **short-horizon incremental
+  spend**, the ridge P50 in BAC-fraction space, the **split-conformal** P10–P90 band, the joint
+  residual-path cost cone, the **grouped rolling-origin** back-test against four baselines, and the
+  validated-vs-directional split across the tab, API, and copilot.
+- [Idea 3 — Estimate Assumption Stress Test: How It Was Actually Built](14-idea-3-implementation.md) —
+  engineering reality for Feature 3: the double reframe away from a should-cost tautology, the
+  deterministic engine's **three separated output classes** (reconciliation tie-out / cohort-gated
+  assumption flags / retrospective peer benchmark), the load-bearing **Output-Norm divisor**, the
+  leave-one-out + 5-peer-minimum guards, and the tie-out test suite that is the engine's credibility.
+
 ## How to read a feature doc
 
 Each doc is intentionally short and follows the same shape:
