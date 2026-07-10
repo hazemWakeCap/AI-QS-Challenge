@@ -13,11 +13,13 @@ import { ForecastCone } from "./components/ForecastCone";
 import { ForecastBacktestPanel } from "./components/ForecastBacktest";
 import { StressTest } from "./components/StressTest";
 import { VarianceCard } from "./components/VarianceCard";
+import { Drawer } from "./components/Drawer";
 import { ProjectsAdmin } from "./components/ProjectsAdmin";
 import { EmptyState } from "./components/Loading";
 
-type Tab = "overview" | "centres" | "capture" | "workflow" | "data" | "watchlist" | "proof" | "forecast" | "stress" | "insight" | "projects";
-const TABS: { id: Tab; label: string }[] = [
+type Tab = "copilot" | "overview" | "centres" | "capture" | "workflow" | "data" | "watchlist" | "proof" | "forecast" | "stress" | "validation" | "projects";
+const TABS: { id: Tab; label: string; featured?: boolean }[] = [
+  { id: "copilot", label: "AI Assistant", featured: true },
   { id: "overview", label: "EVM Overview" },
   { id: "centres", label: "Cost Centres" },
   { id: "capture", label: "Monthly Capture" },
@@ -27,7 +29,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "proof", label: "Proof" },
   { id: "forecast", label: "Forecast" },
   { id: "stress", label: "Stress Test" },
-  { id: "insight", label: "Model & Copilot" },
+  { id: "validation", label: "Model Validation" },
   { id: "projects", label: "Projects" },
 ];
 
@@ -37,7 +39,7 @@ export default function App() {
   const [slug, setSlug] = useState<string>("");
   const [range, setRange] = useState<{ min: number; forecast: number }>({ min: 1, forecast: 12 });
   const [period, setPeriod] = useState(12);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("copilot");
   const [rev, setRev] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [varianceBcc, setVarianceBcc] = useState<string | null>(null);
@@ -113,7 +115,7 @@ export default function App() {
 
       <nav className="tabs">
         {TABS.map((t) => (
-          <button key={t.id} className={tab === t.id ? "tab active" : "tab"} onClick={() => setTab(t.id)}>{t.label}</button>
+          <button key={t.id} className={["tab", tab === t.id && "active", t.featured && "tab-featured"].filter(Boolean).join(" ")} onClick={() => setTab(t.id)}>{t.label}</button>
         ))}
       </nav>
 
@@ -134,14 +136,17 @@ export default function App() {
             {tab === "workflow" && <section className="card narrow"><PeriodsPanel rev={rev} onChanged={refresh} activeVersionId={project?.activeEstimateVersionId ?? null} /></section>}
             {tab === "data" && <section className="card"><DataAdmin rev={rev} onChanged={refresh} /></section>}
             {tab === "watchlist" && (
-              <div className="content-stack">
+              <>
                 <section className="card">
                   <div className="panel-head"><span className="pill pill-blue">WATCHLIST</span>
-                    <span className="muted small">Click a row to explain its variance (idea-5 attribution bridge).</span></div>
-                  <Watchlist period={Math.max(period, 4)} k={10} onSelect={setVarianceBcc} />
+                    <span className="muted small">Click a row to open its variance attribution (idea-5 attribution bridge).</span></div>
+                  <Watchlist period={Math.max(period, 4)} k={10} onSelect={setVarianceBcc} selectedBcc={varianceBcc} />
                 </section>
-                {varianceBcc && <section className="card"><VarianceCard bcc={varianceBcc} period={Math.max(period, 4)} currency={cur} /></section>}
-              </div>
+                <Drawer open={!!varianceBcc} onClose={() => setVarianceBcc(null)}
+                        title={<span className="mono">Variance · {varianceBcc}</span>}>
+                  {varianceBcc && <VarianceCard bcc={varianceBcc} period={Math.max(period, 4)} currency={cur} />}
+                </Drawer>
+              </>
             )}
             {tab === "proof" && <section className="card proof-card"><Proof range={range} /></section>}
             {tab === "forecast" && (
@@ -151,12 +156,8 @@ export default function App() {
               </div>
             )}
             {tab === "stress" && <section className="card"><StressTest rev={rev} /></section>}
-            {tab === "insight" && (
-              <div className="content-stack">
-                <Copilot period={period} />
-                <section className="card"><ValidationPanel /></section>
-              </div>
-            )}
+            {tab === "copilot" && <Copilot period={period} />}
+            {tab === "validation" && <section className="card"><ValidationPanel /></section>}
           </>
         )}
       </div>

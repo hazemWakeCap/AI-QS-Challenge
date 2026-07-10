@@ -57,37 +57,45 @@ export function Copilot({ period = 12 }: { period?: number }) {
 
   return (
     <div className="copilot-layout">
-      {/* ── proactive drift-watchlist opener (answered without being asked) ── */}
-      <section className="card">
-        <div className="panel-head">
-          <span className="pill pill-blue">DRIFT WATCHLIST</span>
-          <span className="muted small">
-            Opened on the standing answer{driftCount != null ? ` · ${driftCount} centres flagged this period` : ""}. Ask a follow-up below.
-          </span>
-        </div>
-        <Watchlist period={Math.max(period, 4)} k={5} />
-      </section>
-
-      {/* ── chat: ad-hoc questions, every answer with its source trail ── */}
+      {/* ── chat is the hero: ad-hoc questions, every answer with its source trail ── */}
       <aside className="panel copilot">
-        <h2>QS Cost Copilot</h2>
-        <p className="muted small">Ask in plain English. Every number is read through tested tools and shows the rows behind it.</p>
+        <div className="copilot-header">
+          <div className="copilot-avatar" aria-hidden>✦</div>
+          <div className="copilot-heading">
+            <h2>QS Cost Copilot</h2>
+            <p className="muted small">Ask in plain English — every number is read through tested tools and shows the rows behind it.</p>
+          </div>
+        </div>
 
         <div className="chat">
           {msgs.length === 0 && (
-            <div className="suggestions">
-              {suggestions.map((s) => (
-                <button key={s} className="suggestion" onClick={() => send(s)}>{s}</button>
-              ))}
+            <div className="chat-empty">
+              <div className="chat-empty-label">Try asking</div>
+              <div className="suggestions">
+                {suggestions.map((s) => (
+                  <button key={s} className="suggestion" onClick={() => send(s)}>
+                    <span className="suggestion-arrow" aria-hidden>→</span>
+                    <span>{s}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           {msgs.map((m, i) => (
-            <div key={i} className={`bubble ${m.role} ${m.refused ? "refused" : ""}`}>
-              <div className="bubble-text">{m.text}</div>
-              {m.evidence && m.evidence.length > 0 && <Sources evidence={m.evidence} />}
+            <div key={i} className={`msg ${m.role}`}>
+              {m.role === "assistant" && <div className="msg-avatar" aria-hidden>✦</div>}
+              <div className={`bubble ${m.role} ${m.refused ? "refused" : ""}`}>
+                <div className="bubble-text">{m.text}</div>
+                {m.evidence && m.evidence.length > 0 && <Sources evidence={m.evidence} />}
+              </div>
             </div>
           ))}
-          {busy && <div className="bubble assistant muted">Thinking…</div>}
+          {busy && (
+            <div className="msg assistant">
+              <div className="msg-avatar" aria-hidden>✦</div>
+              <div className="bubble assistant typing"><span /><span /><span /></div>
+            </div>
+          )}
         </div>
 
         <form className="composer" onSubmit={(e) => { e.preventDefault(); send(input); }}>
@@ -100,6 +108,19 @@ export function Copilot({ period = 12 }: { period?: number }) {
           <button type="submit" disabled={busy || !input.trim()}>Ask</button>
         </form>
       </aside>
+
+      {/* ── proactive drift watchlist: a secondary, collapsed standing answer ── */}
+      <details className="card drift-collapsible">
+        <summary className="drift-summary">
+          <span className="pill pill-blue">DRIFT WATCHLIST</span>
+          <span className="muted small">
+            {driftCount != null ? `${driftCount} centres flagged this period` : "This period's standing answer"} — expand to view
+          </span>
+        </summary>
+        <div className="drift-body">
+          <Watchlist period={Math.max(period, 4)} k={5} />
+        </div>
+      </details>
     </div>
   );
 }
