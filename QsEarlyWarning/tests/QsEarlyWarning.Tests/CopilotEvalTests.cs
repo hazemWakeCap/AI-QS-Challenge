@@ -155,6 +155,32 @@ public sealed class CopilotEvalTests
         Assert.NotNull(Err(Tools.ProjectEvm(99)));
     }
 
+    // ── progress: plan/actual percent complete filter ──
+
+    [Fact]
+    public void ListCentresByProgress_matches_independently_computed_plan_below_100()
+    {
+        const int period = 8;
+        // Independent ground truth: centres at the period with BOTH progress fields finite and Plan < 100.
+        var scoreable = Panel.Where(p => p.PeriodId == period
+            && p.PlanPctComplete is double pl && double.IsFinite(pl)
+            && p.ActualPctComplete is double a && double.IsFinite(a)).ToList();
+        int gtBelow100 = scoreable.Count(p => p.PlanPctComplete!.Value < 100);
+        int gtExcluded = Panel.Count(p => p.PeriodId == period) - scoreable.Count;
+
+        var result = Tools.ListCentresByProgress(period, maxPlanPct: 100, limit: 500);
+        Assert.Null(Err(result));
+        Assert.Equal(gtBelow100, (int)P(result, "matchedCount")!);
+        Assert.Equal(gtExcluded, (int)P(result, "excludedCount")!);   // rows missing plan/actual are counted, not dropped
+        // Every returned row honours the strict-less-than bound.
+        var rows = (System.Collections.IEnumerable)P(result, "rows")!;
+        foreach (var row in rows) Assert.True((D(P(row, "planPctComplete")) ?? 100) < 100);
+    }
+
+    [Fact]
+    public void ListCentresByProgress_rejects_out_of_range_period()
+        => Assert.NotNull(Err(Tools.ListCentresByProgress(99)));
+
     // ── resource split + cross-sheet (stress) ──
 
     [Fact]

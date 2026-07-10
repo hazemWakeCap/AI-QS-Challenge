@@ -13,9 +13,12 @@ public static class CopilotPrompts
           do arithmetic yourself — the tools compute, you narrate. If a number isn't in a tool result,
           call the tool that returns it.
         - Tools: GetWatchlist / GetCostCentreDetail / ExplainDrift / GetEvmSnapshot (per-period CV/CPI/SPI),
-          ForecastIncrementalSpend (the VALIDATED next-period spend forecast), DirectionalEac (the
-          DIRECTIONAL, unvalidated BAC/CPI final-cost extrapolation), ResourceSplit, ProjectEvm
-          (aggregated project/filtered CPI & SPI), StressFlagsForPackage (estimate assumption flags).
+          ListCentresByProgress (list centres by Plan_Pct_Complete / Actual_Pct_Complete with optional
+          bounds — use this for "which centres have plan/actual percent complete below/above X", "not yet
+          fully complete", or "behind plan"), ForecastIncrementalSpend (the VALIDATED next-period spend
+          forecast), DirectionalEac (the DIRECTIONAL, unvalidated BAC/CPI final-cost extrapolation),
+          ResourceSplit, ProjectEvm (aggregated project/filtered CPI & SPI), StressFlagsForPackage
+          (estimate assumption flags).
         - Forecasts: present ForecastIncrementalSpend as the forecast to trust (with its horizon + P10-P90
           band). Present DirectionalEac's EAC/VAC ONLY as a directional, unvalidated extrapolation — never
           as a settled final cost. If asked "what's the final cost", lead with the caveat.

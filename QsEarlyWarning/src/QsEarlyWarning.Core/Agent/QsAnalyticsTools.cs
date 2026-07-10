@@ -289,6 +289,79 @@ public sealed class QsAnalyticsTools
         };
     }
 
+    // ── progress surface: plan vs actual percent-complete per centre ──
+
+    [Description("List cost centres by PROGRESS at a period. Returns each centre's planned percent complete " +
+                 "(Plan_Pct_Complete), actual percent complete (Actual_Pct_Complete), and the plan−actual gap. " +
+                 "Use for questions like 'which BCCs have Plan_Pct_Complete < 100', 'centres not yet fully " +
+                 "planned-complete', or 'which centres are behind plan'. The optional bounds filter on the raw " +
+                 "percent columns (0-100): max bounds are STRICTLY LESS THAN, min bounds are >= (inclusive) — so " +
+                 "Plan_Pct_Complete < 100 is maxPlanPct=100. Rows missing either field are excluded and counted.")]
+    public object ListCentresByProgress(
+        [Description("Reporting period")] int periodId,
+        [Description("Optional: keep only centres with Plan_Pct_Complete strictly less than this (0-100). e.g. 100 = not yet fully planned-complete.")] double? maxPlanPct = null,
+        [Description("Optional: keep only centres with Plan_Pct_Complete >= this (0-100).")] double? minPlanPct = null,
+        [Description("Optional: keep only centres with Actual_Pct_Complete strictly less than this (0-100).")] double? maxActualPct = null,
+        [Description("Optional: keep only centres with Actual_Pct_Complete >= this (0-100).")] double? minActualPct = null,
+        [Description("Max rows to return (default 50, capped at 200).")] int limit = 50)
+    {
+        if (!PresentPeriod(periodId)) return Err($"periodId must be {_snapshot.MinPeriod}..{_snapshot.ForecastPeriod}.");
+        int cap = Math.Clamp(limit, 1, 200);
+
+        // Scoreable = BOTH progress fields finite; missing rows are excluded and COUNTED, never silently dropped.
+        var inScope = Panel.Where(p => p.PeriodId == periodId).ToList();
+        var scoreable = inScope.Where(p =>
+            p.PlanPctComplete is double pl && double.IsFinite(pl)
+            && p.ActualPctComplete is double ac && double.IsFinite(ac)).ToList();
+
+        bool Keep(CostCentrePeriod p)
+        {
+            double plan = p.PlanPctComplete!.Value, act = p.ActualPctComplete!.Value;
+            return (maxPlanPct is null || plan < maxPlanPct.Value)
+                && (minPlanPct is null || plan >= minPlanPct.Value)
+                && (maxActualPct is null || act < maxActualPct.Value)
+                && (minActualPct is null || act >= minActualPct.Value);
+        }
+
+        var matched = scoreable.Where(Keep)
+            .OrderBy(p => p.PlanPctComplete!.Value).ThenBy(p => p.BccId, StringComparer.Ordinal)
+            .ToList();
+
+        var filter = string.Join(" · ", new[]
+        {
+            $"period {periodId}",
+            maxPlanPct is null ? null : $"planPct<{maxPlanPct}",
+            minPlanPct is null ? null : $"planPct>={minPlanPct}",
+            maxActualPct is null ? null : $"actualPct<{maxActualPct}",
+            minActualPct is null ? null : $"actualPct>={minActualPct}",
+        }.Where(s => s is not null));
+
+        int excluded = inScope.Count - scoreable.Count;
+        var rows = matched.Take(cap).Select(p => new
+        {
+            bccId = p.BccId,
+            discipline = p.Discipline,
+            packageCode = p.PackageCode,
+            planPctComplete = Round(p.PlanPctComplete),
+            actualPctComplete = Round(p.ActualPctComplete),
+            planMinusActualPp = Round(p.PlanPctComplete!.Value - p.ActualPctComplete!.Value),
+        }).ToList();
+
+        return new
+        {
+            period = periodId,
+            filter,
+            matchedCount = matched.Count,
+            returnedCount = rows.Count,
+            excludedCount = excluded,
+            truncated = matched.Count > rows.Count,
+            rows,
+            note = "Percent columns are 0-100. planMinusActualPp = plan − actual (positive ⇒ actual is behind plan).",
+            sources = Src("9_HISTORICAL_DATA", periodId, filter, excluded,
+                rowIds: matched.Select(p => Key(p.BccId, p.PeriodId))),
+        };
+    }
+
     // ── idea-3 surface: estimate assumption stress test (computed report only, G9) ──
 
     [Description("Get the estimate assumption stress-test findings for a package: the Class-1 reconciliation " +
