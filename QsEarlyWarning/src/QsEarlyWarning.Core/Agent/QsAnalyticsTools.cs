@@ -102,26 +102,119 @@ public sealed class QsAnalyticsTools
         };
     }
 
-    [Description("Explain why a cost centre received its risk score at a period: the deterministic risk " +
-                 "indicators (which threshold/trend conditions put it high).")]
+    [Description("Explain a cost centre's cost drift at a period — for ANY centre and status, not only " +
+                 "watchlist GREEN candidates. When the centre is a GREEN centre eligible for the watchlist, " +
+                 "returns mode='watchlist': its tipping-risk score and the deterministic risk indicators " +
+                 "(which threshold/trend conditions rank it high). When it has ALREADY drifted (AMBER) or is " +
+                 "otherwise off the watchlist, returns mode='trajectory': its current CPI vs the 0.95 AMBER " +
+                 "line, the period it first crossed, the CPI/gap/SPI trend, how many periods it has held its " +
+                 "status, and a short history — so a QS can see HOW it drifted, not just that it isn't a " +
+                 "candidate. Use for 'explain the drift for <BCC>' on any centre.")]
     public object ExplainDrift(
         [Description("Cost centre id")] string bccId,
         [Description("Reporting period, 4..12")] int periodId)
     {
         if (string.IsNullOrWhiteSpace(bccId)) return Err("bccId is required.");
-        if (!ScoreablePeriod(periodId)) return Err($"periodId must be {EvmThresholds.MinTrainOrigin}..{EvmThresholds.ForecastPeriod}.");
+        if (!PresentPeriod(periodId)) return Err($"periodId must be {_snapshot.MinPeriod}..{_snapshot.ForecastPeriod}.");
 
-        var r = _scoring.ScorePeriod(Panel, periodId, _snapshot.Model);
-        var row = r.Rows.FirstOrDefault(x => string.Equals(x.BccId, bccId, StringComparison.OrdinalIgnoreCase));
-        return row is null
-            ? Err($"{bccId} is not a scoreable GREEN centre at period {periodId}.")
-            : new
+        // Watchlist mode: only for a scoreable period where the centre is a GREEN tipping candidate.
+        if (ScoreablePeriod(periodId))
+        {
+            var r = _scoring.ScorePeriod(Panel, periodId, _snapshot.Model);
+            var row = r.Rows.FirstOrDefault(x => string.Equals(x.BccId, bccId, StringComparison.OrdinalIgnoreCase));
+            if (row is not null)
+                return new
+                {
+                    mode = "watchlist",
+                    bccId, periodId,
+                    status = "GREEN",
+                    onWatchlist = true,
+                    riskScore = Math.Round(row.RiskScore, 3),
+                    cpi = Round(row.Cpi),
+                    gapPp = Round(row.Gap),
+                    riskIndicators = row.RiskIndicators,
+                    sources = Src("9_HISTORICAL_DATA", periodId, bccId, excluded: null, rowIds: new[] { Key(bccId, periodId) }),
+                };
+        }
+
+        // Trajectory mode: any centre/status present at the period (already-AMBER, CLOSED, or GREEN-not-scoreable).
+        return ExplainTrajectory(bccId, periodId);
+    }
+
+    /// <summary>
+    /// Deterministic drift narrative for a centre that is NOT a GREEN watchlist tipping candidate at
+    /// <paramref name="periodId"/> (already AMBER, CLOSED, or GREEN-but-unscoreable). Every figure is read
+    /// from a pre-computed 9_HISTORICAL_DATA column or a simple period-over-period difference computed here
+    /// (never by the model): current CPI vs the 0.95 AMBER line, the period it first crossed, the CPI trend,
+    /// the budget-vs-progress gap, the schedule lane (SPI), and how long it has held its status.
+    /// </summary>
+    private object ExplainTrajectory(string bccId, int periodId)
+    {
+        var series = Panel
+            .Where(p => string.Equals(p.BccId, bccId, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.PeriodId)
+            .ToList();
+        if (series.Count == 0) return Err($"No rows for {bccId}.");
+
+        var byPeriod = series.ToDictionary(p => p.PeriodId);
+        if (!byPeriod.TryGetValue(periodId, out var cur)) return Err($"No row for {bccId} at period {periodId}.");
+
+        const double line = EvmThresholds.CpiThreshold; // 0.95 AMBER line
+        double? cpi = Fin(cur.Cpi), gap = Fin(cur.Gap), spi = Fin(cur.Spi);
+        string? status = cur.AlertLevel;
+
+        // CPI change vs the EXACT previous period only (null across a gap) — a difference, not model arithmetic.
+        double? dCpi1 = byPeriod.TryGetValue(periodId - 1, out var prev)
+            && Fin(prev.Cpi) is double b && cpi is double a ? a - b : (double?)null;
+
+        // Earliest period (≤ periodId) whose recorded CPI first fell below the 0.95 line.
+        int? firstBreach = series
+            .Where(p => p.PeriodId <= periodId && Fin(p.Cpi) is double c && c < line)
+            .Select(p => (int?)p.PeriodId)
+            .FirstOrDefault();
+
+        // Consecutive periods ending at periodId that hold the current status.
+        int periodsAtStatus = 0;
+        for (int q = periodId; byPeriod.TryGetValue(q, out var rr)
+            && string.Equals(rr.AlertLevel, status, StringComparison.OrdinalIgnoreCase); q--) periodsAtStatus++;
+
+        // Deterministic drift indicators (contextual, not causal), largest-magnitude first — same style as the watchlist.
+        var items = new List<(double weight, string text)>();
+        if (cpi is double c1)
+            items.Add(c1 < line
+                ? (line - c1 + 1.0, $"CPI {c1:0.000} — already {(line - c1):0.000} below the 0.95 AMBER line")
+                : (0.2, $"CPI {c1:0.000} — at/above the 0.95 line"));
+        if (dCpi1 is double d1 && d1 < 0) items.Add((-d1, $"CPI down {(-d1):0.000} since period {periodId - 1}"));
+        else if (dCpi1 is double d1u && d1u > 0) items.Add((d1u * 0.5, $"CPI up {d1u:0.000} since period {periodId - 1} (recovering)"));
+        if (gap is double g && g > 0) items.Add((g / 100.0, $"spending {g:0.0}pp ahead of progress"));
+        if (spi is double s && s < 1.0) items.Add((1.0 - s, $"behind schedule — SPI {s:0.000}"));
+        if (periodsAtStatus >= 2 && !string.Equals(status, "GREEN", StringComparison.OrdinalIgnoreCase))
+            items.Add((0.4, $"held {status} for {periodsAtStatus} periods running"));
+        if (items.Count == 0) items.Add((0, "insufficient signal to characterise drift"));
+
+        var history = series.Where(p => p.PeriodId <= periodId).TakeLast(6).ToList();
+
+        return new
+        {
+            mode = "trajectory",
+            bccId, periodId,
+            status,
+            onWatchlist = false,
+            watchlistNote = status is not null && !string.Equals(status, "GREEN", StringComparison.OrdinalIgnoreCase)
+                ? $"Off the tipping watchlist — the watchlist ranks GREEN centres about to cross 0.95; this centre is {status}, already past the line, so its drift is described from its trajectory below."
+                : "Not scored on the watchlist here (the watchlist ranks GREEN centres with finite CPI/progress inputs); drift is described from its trajectory below.",
+            cpi = Round(cpi), gapPp = Round(gap), spi = Round(spi),
+            amberLine = line,
+            firstBreachedAmberAtPeriod = firstBreach,
+            periodsAtStatus,
+            driftIndicators = items.OrderByDescending(x => x.weight).Take(4).Select(x => x.text).ToList(),
+            history = history.Select(p => new
             {
-                bccId, periodId,
-                riskScore = Math.Round(row.RiskScore, 3),
-                riskIndicators = row.RiskIndicators,
-                sources = Src("9_HISTORICAL_DATA", periodId, bccId, excluded: null, rowIds: new[] { Key(bccId, periodId) }),
-            };
+                period = p.PeriodId, alert = p.AlertLevel, cpi = Round(Fin(p.Cpi)), gapPp = Round(Fin(p.Gap)), spi = Round(Fin(p.Spi)),
+            }),
+            sources = Src("9_HISTORICAL_DATA", periodId, $"{bccId} trajectory (last {history.Count} periods)",
+                excluded: null, rowIds: history.Select(p => Key(p.BccId, p.PeriodId))),
+        };
     }
 
     [Description("Get the validated per-period EVM identities for a cost centre: CV, CPI, SPI. Does NOT " +
@@ -205,6 +298,62 @@ public sealed class QsAnalyticsTools
             note = "Directional BAC/CPI extrapolation, not a validated forecast. Use forecast_incremental_spend to trust a forecast.",
             eac = Round(eac), vac = Round(vac), bac = Round(bac), cpi = Round(cpi),
             sources = Src("9_HISTORICAL_DATA", periodId, bccId, excluded: null, rowIds: new[] { Key(bccId, periodId) }),
+        };
+    }
+
+    [Description("Run a UNIT-RATE WHAT-IF scenario for a cost centre: 'if we renegotiate / from next " +
+                 "period the rate becomes X per unit, what happens?'. Reprices the centre's REMAINING " +
+                 "quantity at the user-supplied AED/unit rate, keeping its recent physical pace, and returns " +
+                 "the next 3 periods' spend, the scenario cost-to-complete, final cost and VAC. This is a " +
+                 "user ASSUMPTION, not a validated forecast (returned validated=false, assumptionBased=true): " +
+                 "the newUnitRate is the QS's input, not a sheet figure. Also returns the centre's current " +
+                 "realized rate and planned rate so the scenario can be contrasted. For the trustworthy " +
+                 "data-driven forecast instead, use forecast_incremental_spend.")]
+    public object ScenarioForecast(
+        [Description("Cost centre id")] string bccId,
+        [Description("Assumed go-forward cost per unit (AED/unit), e.g. 299. Must be > 0.")] double newUnitRate,
+        [Description("Optional period the new rate takes effect (default: next period after the latest).")] int? effectiveFromPeriod = null)
+    {
+        if (string.IsNullOrWhiteSpace(bccId)) return Err("bccId is required.");
+        if (!double.IsFinite(newUnitRate) || newUnitRate <= 0) return Err("newUnitRate must be a positive number (AED per unit).");
+
+        int origin = _snapshot.ForecastPeriod;
+        var s = ScenarioForecaster.Rate(Panel, bccId, origin, newUnitRate, effectiveFromPeriod);
+        if (!s.Available)
+            return new { bccId, originPeriod = origin, available = false, reason = s.UnavailableReason };
+
+        return new
+        {
+            bccId = s.BccId,
+            originPeriod = s.OriginPeriod,
+            validated = false,
+            assumptionBased = true,
+            note = "Scenario at a user-supplied unit rate — NOT a validated forecast. Assumes the remaining " +
+                   "work continues at the recent physical pace, repriced at the given rate.",
+            assumption = new
+            {
+                newUnitRate = Round(s.NewUnitRate),
+                unit = s.Unit,
+                effectiveFromPeriod = s.EffectiveFromPeriod,
+                paceBasis = "recent earned-quantity run-rate (last ≤3 periods)",
+            },
+            baseline = new
+            {
+                plannedUnitRate = Round(s.PlannedUnitRate),      // = BAC / Budget_Qty
+                currentRealizedRate = Round(s.CurrentRealizedRate), // = AC / earned qty
+                remainingQty = Round(s.RemainingQty),
+                budgetQty = Round(s.BudgetQty),
+                recentQtyPacePerPeriod = Round(s.RecentQtyPacePerPeriod),
+            },
+            scenarioIncrements = s.Increments.Select(b => new
+            {
+                period = b.Period, qty = Round(b.Qty), spend = Round(b.Spend), unitRate = Round(b.UnitRate),
+            }),
+            scenarioCostToComplete = Round(s.ScenarioCostToComplete),
+            scenarioFinalCost = Round(s.ScenarioFinalCost),
+            scenarioVac = Round(s.ScenarioVac),
+            sources = Src("9_HISTORICAL_DATA", origin, $"{bccId} scenario @ {Round(s.NewUnitRate)}/unit",
+                excluded: null, rowIds: new[] { Key(bccId, origin) }),
         };
     }
 
@@ -446,6 +595,7 @@ public sealed class QsAnalyticsTools
         new(sheet, period, filter, excluded, rowIds.Distinct(StringComparer.Ordinal).ToList());
 
     private static object Err(string message) => new { error = message };
+    private static double? Fin(double? v) => v is double d && double.IsFinite(d) ? d : (double?)null;
     private static double? Round(double? v) => v is null || !double.IsFinite(v.Value) ? null : Math.Round(v.Value, 3);
     private static double Round(double v) => double.IsFinite(v) ? Math.Round(v, 3) : 0;
 }

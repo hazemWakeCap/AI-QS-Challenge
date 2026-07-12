@@ -46,7 +46,8 @@ public sealed class PostgresPanelLoader : IProjectPanelSource, IAsyncDisposable
             SELECT bcc_id, period_id, discipline, package_code, wbs_code, alert_level,
                    bac_amount, planned_pct, pv_amount, actual_pct_complete, ev_amount, earned_qty,
                    ac_total_amount, cpi, spi, cv_amount, eac_amount, vac_amount, pct_budget_consumed,
-                   ac_material_amount, ac_manpower_amount, ac_equipment_amount, ac_subcontract_amount
+                   ac_material_amount, ac_manpower_amount, ac_equipment_amount, ac_subcontract_amount,
+                   budget_qty
             FROM qs.cost_centre_evm
             WHERE project_id = @proj
             ORDER BY bcc_id, period_id
@@ -84,6 +85,8 @@ public sealed class PostgresPanelLoader : IProjectPanelSource, IAsyncDisposable
                     AcManpower = Dbl(rd, 20),
                     AcEquipment = Dbl(rd, 21),
                     AcSubcontract = Dbl(rd, 22),
+                    BudgetQty = Dbl(rd, 23),
+                    // Unit is not exposed by the EVM view; left null on the DB path (best-effort label only).
                     // Rolling3mCpi / VariancePct / EacVsBacRatio are recorded-only signals not used by
                     // the scorer; left null (the ranking depends solely on gap + cpi).
                 });

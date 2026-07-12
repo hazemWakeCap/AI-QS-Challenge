@@ -27,6 +27,13 @@ public sealed record CostCentrePeriod
     // Budget
     public double? BacAed { get; init; }
 
+    /// <summary>Budget_Qty — total units of work to build (constant across periods). Used to derive
+    /// remaining quantity and the planned unit rate (= BacAed / BudgetQty) for scenario what-ifs.</summary>
+    public double? BudgetQty { get; init; }
+
+    /// <summary>Unit of work (e.g. "m", "m²"). Best-effort narration label; may be null on the DB path.</summary>
+    public string? Unit { get; init; }
+
     // Plan
     public double? PlanPctComplete { get; init; }
     public double? PvAed { get; init; }

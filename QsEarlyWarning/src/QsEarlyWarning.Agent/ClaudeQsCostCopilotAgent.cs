@@ -88,6 +88,7 @@ public sealed class ClaudeQsCostCopilotAgent : IQsCostCopilotAgent
             AIFunctionFactory.Create(tools.GetEvmSnapshot),
             AIFunctionFactory.Create(tools.ListCentresByProgress),
             AIFunctionFactory.Create(tools.ForecastIncrementalSpend),
+            AIFunctionFactory.Create(tools.ScenarioForecast),
             AIFunctionFactory.Create(tools.DirectionalEac),
             AIFunctionFactory.Create(tools.ResourceSplit),
             AIFunctionFactory.Create(tools.ProjectEvm),

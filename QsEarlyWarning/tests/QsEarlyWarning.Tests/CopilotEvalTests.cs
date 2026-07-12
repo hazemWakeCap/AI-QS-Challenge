@@ -138,6 +138,79 @@ public sealed class CopilotEvalTests
         Assert.Null(result.GetType().GetProperty("eac"));
     }
 
+    // ── unit-rate what-if scenario (idea-4 scenario surface) ──
+
+    [Fact]
+    public void ScenarioForecast_reprices_remaining_qty_and_is_flagged_an_assumption()
+    {
+        // BCC-MEC-DUCT-702 is AMBER at the origin; renegotiate the tail to AED 299/unit.
+        const string bcc = "BCC-MEC-DUCT-702";
+        const double rate = 299.0;
+
+        var byPeriod = Panel.Where(p => p.BccId == bcc).ToDictionary(p => p.PeriodId);
+        int origin = Panel.Max(p => p.PeriodId);
+        var cur = byPeriod[origin];
+
+        // Ground truth, computed INDEPENDENTLY of the tool (leakage guard G8).
+        double budgetQty = cur.BudgetQty!.Value;
+        double earned = cur.EarnedQtyCumul!.Value;
+        double ac = cur.AcCumulative!.Value;
+        double bac = cur.BacAed!.Value;
+        double remaining = budgetQty - earned;
+        double gtCtc = Math.Round(remaining * rate, 3);
+        double gtFinal = Math.Round(ac + remaining * rate, 3);
+        double gtVac = Math.Round(bac - (ac + remaining * rate), 3);
+        double gtPlannedRate = Math.Round(bac / budgetQty, 3);
+        double gtCurrentRate = Math.Round(ac / earned, 3);
+        // recent qty pace = mean ΔEarnedQty over the ≤3 periods ending at origin
+        double pace = new[] { origin, origin - 1, origin - 2 }
+            .Select(k => byPeriod.TryGetValue(k, out var a) && byPeriod.TryGetValue(k - 1, out var b)
+                ? a.EarnedQtyCumul!.Value - b.EarnedQtyCumul!.Value : (double?)null)
+            .Where(d => d.HasValue).Average(d => d!.Value);
+
+        var result = Tools.ScenarioForecast(bcc, rate);
+        Assert.Null(Err(result));
+
+        // It is an assumption, NOT a validated forecast.
+        Assert.False((bool)P(result, "validated")!);
+        Assert.True((bool)P(result, "assumptionBased")!);
+
+        // The scenario numbers match the independent ground truth.
+        Assert.Equal(gtCtc, D(P(result, "scenarioCostToComplete")));
+        Assert.Equal(gtFinal, D(P(result, "scenarioFinalCost")));
+        Assert.Equal(gtVac, D(P(result, "scenarioVac")));
+
+        var baseline = P(result, "baseline");
+        Assert.Equal(Math.Round(remaining, 3), D(P(baseline, "remainingQty")));
+        Assert.Equal(gtPlannedRate, D(P(baseline, "plannedUnitRate")));
+        Assert.Equal(gtCurrentRate, D(P(baseline, "currentRealizedRate")));
+
+        var assumption = P(result, "assumption");
+        Assert.Equal(299.0, D(P(assumption, "newUnitRate")));
+
+        // Next 3 periods repriced at the recent pace × the new rate.
+        var incs = ((System.Collections.IEnumerable)P(result, "scenarioIncrements")!).Cast<object>().ToList();
+        Assert.Equal(3, incs.Count);
+        Assert.Equal(origin + 1, (int)P(incs[0], "period")!);
+        Assert.Equal(Math.Round(pace * rate, 3), D(P(incs[0], "spend")));
+    }
+
+    [Fact]
+    public void ScenarioForecast_rejects_nonpositive_rate_and_blank_bcc()
+    {
+        Assert.NotNull(Err(Tools.ScenarioForecast("   ", 299)));
+        Assert.NotNull(Err(Tools.ScenarioForecast("BCC-MEC-DUCT-702", 0)));
+        Assert.NotNull(Err(Tools.ScenarioForecast("BCC-MEC-DUCT-702", double.NaN)));
+    }
+
+    [Fact]
+    public void ScenarioForecast_unknown_centre_is_unavailable_not_a_guess()
+    {
+        var result = Tools.ScenarioForecast("BCC-DOES-NOT-EXIST", 299);
+        Assert.False((bool)P(result, "available")!);
+        Assert.Null(result.GetType().GetProperty("scenarioFinalCost"));
+    }
+
     // ── argument validation / adversarial ──
 
     [Fact]

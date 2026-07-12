@@ -76,6 +76,8 @@ public sealed class ExcelPanelLoader : IPanelLoader
                 PackageCode = pkg,
                 AlertLevel = alert,
                 BacAed = Num(ws, r, col, "BAC_AED"),
+                BudgetQty = Num(ws, r, col, "Budget_Qty"),
+                Unit = Str(ws, r, col, "Unit"),
                 PlanPctComplete = Num(ws, r, col, "Plan_Pct_Complete"),
                 PvAed = Num(ws, r, col, "PV_AED"),
                 ActualPctComplete = Num(ws, r, col, "Actual_Pct_Complete"),

@@ -27,6 +27,20 @@ public static class IncrementHelper
     public static double? EvInc(IReadOnlyDictionary<int, CostCentrePeriod> byPeriod, int k)
         => Diff(byPeriod, k, r => r.EvAed);
 
+    /// <summary>Earned-quantity increment ΔEarnedQty(k) = EarnedQtyCumul(k) − EarnedQtyCumul(k−1).</summary>
+    public static double? QtyInc(IReadOnlyDictionary<int, CostCentrePeriod> byPeriod, int k)
+        => Diff(byPeriod, k, r => r.EarnedQtyCumul);
+
+    /// <summary>Recent physical pace: mean of the present earned-quantity increments over the ≤3
+    /// periods ending at k (units built per period). Null if no adjacent increment is present.</summary>
+    public static double? RecentQtyPace(IReadOnlyDictionary<int, CostCentrePeriod> byPeriod, int k)
+    {
+        double s = 0; int n = 0;
+        for (int j = k; j > k - 3; j--)
+            if (QtyInc(byPeriod, j) is double q) { s += q; n++; }
+        return n > 0 ? s / n : null;
+    }
+
     /// <summary>Rolling CPI over the ≤3 present periods ending at k (current period included):
     /// ΣΔEV ÷ ΣΔAC (sum-of-increments, not a mean of per-period ratios). Null if the AC denominator is 0/absent.</summary>
     public static double? RollCpi(IReadOnlyDictionary<int, CostCentrePeriod> byPeriod, int k)

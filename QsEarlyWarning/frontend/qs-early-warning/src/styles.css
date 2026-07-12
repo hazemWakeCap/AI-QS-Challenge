@@ -276,6 +276,8 @@ table.mini { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .search { background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
   border-radius: var(--r-sm); padding: 6px 10px; font-size: 13px; margin-left: auto; font-family: inherit; }
 .num.bad { color: var(--bad); }
+.grid th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.grid th.sortable:hover { color: var(--text); }
 .tag { font-size: var(--fs-eyebrow); font-weight: 700; padding: 2px 9px; border-radius: var(--r-pill); }
 .tag-green { background: rgba(34,165,106,.16); color: var(--good); }
 .tag-amber { background: rgba(217,154,28,.16); color: var(--warn); }
@@ -332,6 +334,21 @@ tr.selected td { background: var(--accent-weak); box-shadow: inset 3px 0 0 var(-
 @keyframes drawer-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
 @keyframes drawer-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 640px) { .drawer { width: 100vw; border-left: none; } }
+
+/* cost-centre detail drawer: sections below the KPI panel (drift attribution + correction actions) */
+.detail-section { margin-top: var(--sp-5); padding-top: var(--sp-4); border-top: 1px solid var(--border); }
+.detail-section h3 { margin: 0 0 var(--sp-3); font-size: var(--fs-eyebrow); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+
+/* 3-month what-if forecast: legend + scenario colour swatches (validated CVD-safe order) */
+.corr-forecast { margin-top: var(--sp-3); }
+.corr-legend { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-top: var(--sp-2); }
+.corr-key { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text); }
+.corr-swatch { display: inline-block; width: 14px; height: 3px; border-radius: 2px; flex: none;
+  vertical-align: middle; margin-right: 4px; }
+.corr-swatch.dashed { height: 2px; opacity: .65;
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 6px);
+  mask-image: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 6px); }
 
 /* idea-4 copilot: proactive opener + sources panel */
 .content-stack { display: flex; flex-direction: column; gap: var(--sp-5); }

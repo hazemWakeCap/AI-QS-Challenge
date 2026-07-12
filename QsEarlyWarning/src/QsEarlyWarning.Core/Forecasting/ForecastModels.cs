@@ -76,6 +76,50 @@ public sealed record CentreForecast
 public sealed record ProjectSpendScenario(
     int OriginPeriod, double P10, double P50, double P90, int Centres, int Draws);
 
+/// <summary>One future period's repriced spend under a unit-rate scenario.</summary>
+public sealed record ScenarioPeriodSpend(int Period, double Qty, double Spend, double UnitRate);
+
+/// <summary>
+/// A deterministic unit-rate "what-if": the centre's remaining quantity repriced at a user-supplied
+/// AED/unit rate, flowing at the recent physical pace. NOT a validated forecast — every figure is a
+/// direct arithmetic consequence of the stated assumption, surfaced so the copilot can narrate it as
+/// a scenario and contrast it with the current realized rate.
+/// </summary>
+public sealed record ScenarioForecast
+{
+    public required bool Available { get; init; }
+    public string? UnavailableReason { get; init; }
+
+    public required string BccId { get; init; }
+    public required int OriginPeriod { get; init; }
+    public string? Unit { get; init; }
+
+    // Assumption (echoed back)
+    public required double NewUnitRate { get; init; }
+    public required int EffectiveFromPeriod { get; init; }
+
+    // Baseline the scenario is measured against
+    public double BudgetQty { get; init; }
+    public double RemainingQty { get; init; }
+    public double? PlannedUnitRate { get; init; }        // = BAC / BudgetQty
+    public double? CurrentRealizedRate { get; init; }    // = AC / EarnedQty
+    public double RecentQtyPacePerPeriod { get; init; }
+
+    // Scenario projection
+    public required IReadOnlyList<ScenarioPeriodSpend> Increments { get; init; }
+    public double ScenarioCostToComplete { get; init; }
+    public double ScenarioFinalCost { get; init; }       // = AC(origin) + costToComplete
+    public double? ScenarioVac { get; init; }            // = BAC − finalCost
+
+    public static ScenarioForecast Unavailable(string bccId, int origin, double rate, int effectiveFrom, string reason) =>
+        new()
+        {
+            Available = false, UnavailableReason = reason,
+            BccId = bccId, OriginPeriod = origin, NewUnitRate = rate, EffectiveFromPeriod = effectiveFrom,
+            Increments = Array.Empty<ScenarioPeriodSpend>(),
+        };
+}
+
 /// <summary>Per-horizon back-test metrics for one predictor (the model or a baseline), on identical eligible rows.</summary>
 public sealed record HorizonMetric(
     string Predictor, int Horizon, int N,

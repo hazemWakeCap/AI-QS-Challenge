@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, session, type Health, type Project } from "./api/client";
+import { api, session, type Health, type Project, type CostCentreEvm } from "./api/client";
 import { EvmOverview } from "./components/EvmOverview";
 import { CostCentreGrid } from "./components/CostCentreGrid";
 import { CapturePanel } from "./components/CapturePanel";
@@ -13,6 +13,7 @@ import { ForecastCone } from "./components/ForecastCone";
 import { ForecastBacktestPanel } from "./components/ForecastBacktest";
 import { StressTest } from "./components/StressTest";
 import { VarianceCard } from "./components/VarianceCard";
+import { CostCentreDetail } from "./components/CostCentreDetail";
 import { Drawer } from "./components/Drawer";
 import { ProjectsAdmin } from "./components/ProjectsAdmin";
 import { EmptyState } from "./components/Loading";
@@ -43,6 +44,7 @@ export default function App() {
   const [rev, setRev] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [varianceBcc, setVarianceBcc] = useState<string | null>(null);
+  const [selectedCentre, setSelectedCentre] = useState<CostCentreEvm | null>(null);
 
   const project = projects.find((p) => p.slug === slug) ?? null;
   // A project with no published estimate has no EVM data yet — its read endpoints would error, so we
@@ -81,6 +83,10 @@ export default function App() {
       setRev((r) => r + 1);
     }).catch((e) => setErr(String(e.message ?? e)));
   }, [slug, isEmpty]);
+
+  // A cost-centre row carries period-specific EVM, so a lingering selection would misrender after the
+  // project or period changes — close the drawer on either switch.
+  useEffect(() => { setSelectedCentre(null); }, [slug, period]);
 
   const periods = Array.from({ length: range.forecast - range.min + 1 }, (_, i) => range.min + i);
   const refresh = () => setRev((r) => r + 1);
@@ -131,7 +137,18 @@ export default function App() {
         ) : (
           <>
             {tab === "overview" && <section className="card"><EvmOverview period={period} rev={rev} currency={cur} /></section>}
-            {tab === "centres" && <section className="card"><CostCentreGrid period={period} rev={rev} currency={cur} /></section>}
+            {tab === "centres" && (
+              <>
+                <section className="card">
+                  <CostCentreGrid period={period} rev={rev} currency={cur}
+                                  onSelect={setSelectedCentre} selectedBcc={selectedCentre?.bccId ?? null} />
+                </section>
+                <Drawer open={!!selectedCentre} onClose={() => setSelectedCentre(null)}
+                        title={<span className="mono">Cost Centre · {selectedCentre?.bccId}</span>}>
+                  {selectedCentre && <CostCentreDetail centre={selectedCentre} period={period} currency={cur} />}
+                </Drawer>
+              </>
+            )}
             {tab === "capture" && <section className="card narrow"><CapturePanel period={period} rev={rev} onChanged={refresh} /></section>}
             {tab === "workflow" && <section className="card narrow"><PeriodsPanel rev={rev} onChanged={refresh} activeVersionId={project?.activeEstimateVersionId ?? null} /></section>}
             {tab === "data" && <section className="card"><DataAdmin rev={rev} onChanged={refresh} /></section>}

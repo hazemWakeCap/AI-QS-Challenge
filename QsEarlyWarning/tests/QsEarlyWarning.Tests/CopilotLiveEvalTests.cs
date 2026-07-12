@@ -54,6 +54,17 @@ public sealed class CopilotLiveEvalTests
     }
 
     [Fact]
+    public async Task Unit_rate_whatif_routes_to_the_scenario_tool()
+    {
+        if (BuildOrSkip() is not var (agent, tools) || agent is null) return;
+        var res = await agent.AskAsync(
+            "Assume we renegotiate BCC-MEC-DUCT-702 to 299 per unit from next period — forecast the next 3 periods.",
+            Array.Empty<CopilotTurn>(), tools, default);
+        Assert.False(string.IsNullOrWhiteSpace(res.Answer));
+        Assert.Contains(res.Evidence, e => e.Tool == nameof(QsAnalyticsTools.ScenarioForecast));
+    }
+
+    [Fact]
     public async Task Final_cost_question_uses_the_directional_tool()
     {
         if (BuildOrSkip() is not var (agent, tools) || agent is null) return;

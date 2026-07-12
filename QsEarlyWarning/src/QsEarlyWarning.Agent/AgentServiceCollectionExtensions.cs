@@ -30,9 +30,11 @@ public static class AgentServiceCollectionExtensions
         }
 
         // Anthropic-backed IChatClient (Microsoft.Extensions.AI), reused by the agent.
+        // 2048 (was 1024): long grounded answers — and especially the correction-action prose plus its
+        // trailing structured-JSON block (drawer what-if forecast) — overran a 1024 cap and truncated.
         services.AddSingleton<IChatClient>(_ =>
             new AnthropicClient { ApiKey = apiKey }
-                .AsIChatClient(model, defaultMaxOutputTokens: 1024)
+                .AsIChatClient(model, defaultMaxOutputTokens: 2048)
                 .AsBuilder()
                 .Build());
 

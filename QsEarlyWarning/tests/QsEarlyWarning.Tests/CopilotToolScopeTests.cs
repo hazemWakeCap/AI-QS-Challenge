@@ -36,6 +36,35 @@ public sealed class CopilotToolScopeTests
     }
 
     [Fact]
+    public void ExplainDrift_explains_an_already_amber_centre_via_trajectory()
+    {
+        // BCC-MEC-DUCT-702 sits at AMBER (CPI 0.919) at period 12 — NOT a GREEN tipping candidate.
+        // ExplainDrift must still explain HOW it drifted, not error out.
+        var result = Tools.ExplainDrift("BCC-MEC-DUCT-702", 12);
+        Assert.Null(ErrorOf(result));
+
+        var t = result.GetType();
+        Assert.Equal("trajectory", t.GetProperty("mode")?.GetValue(result));
+        Assert.Equal("AMBER", t.GetProperty("status")?.GetValue(result));
+        Assert.Equal(false, t.GetProperty("onWatchlist")?.GetValue(result));
+        var indicators = t.GetProperty("driftIndicators")?.GetValue(result) as IEnumerable<string>;
+        Assert.NotNull(indicators);
+        Assert.NotEmpty(indicators!);
+    }
+
+    [Fact]
+    public void ScenarioForecast_validates_rate_and_reports_unavailable_gracefully()
+    {
+        Assert.NotNull(ErrorOf(Tools.ScenarioForecast("BCC-MEC-DUCT-702", -5)));      // negative rate → typed error
+        Assert.NotNull(ErrorOf(Tools.ScenarioForecast("  ", 299)));                    // blank bcc → typed error
+
+        // Unknown centre → available:false object (not a throw, not a fabricated forecast).
+        var unknown = Tools.ScenarioForecast("BCC-DOES-NOT-EXIST", 299);
+        Assert.Null(ErrorOf(unknown));
+        Assert.False((bool)unknown.GetType().GetProperty("available")!.GetValue(unknown)!);
+    }
+
+    [Fact]
     public void GetEvmSnapshot_returns_typed_error_for_blank_bccid()
     {
         var result = Tools.GetEvmSnapshot("  ", 8);
