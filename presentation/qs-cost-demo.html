@@ -118,7 +118,7 @@
 
 <div class="progress" id="bar"></div>
 <div class="brandmark">QS Cost · System of Record</div>
-<div class="counter" id="count">1 / 14</div>
+<div class="counter" id="count">1 / 15</div>
 <div class="arrows"><button id="prev">‹</button><button id="next">›</button></div>
 
 <div class="deck" id="deck">
@@ -411,8 +411,9 @@
             <b style="color:var(--ink)">"Tools compute, the model narrates."</b>
           </p>
           <ul class="bul">
-            <li><b>12 read-only tools</b> do every calculation — the model never does the AED math.</li>
+            <li><b>12 read-only tools</b> do every calculation — the model never does the AED math. One of them is the <b>unit-rate what-if</b>. <span style="color:var(--blue2)">→</span></li>
             <li>On an AMBER centre it <b>drafts prioritised correction actions</b> + a 3-month <b>what-if savings band</b> — the AI supplies only the reduction %, the engine does the AED.</li>
+            <li>Ask why <b>any</b> centre drifted — an already-AMBER one returns its <b>trajectory</b>: when it crossed 0.95, how long it's held, which way CPI moves.</li>
             <li>A <b>Sources panel</b> cites every tool call — resolved period/filter, rows excluded, source row IDs.</li>
             <li>Claude Sonnet 5 · Microsoft Agent Framework; <b>auth-before-LLM</b>, refuses off-topic — no hallucinated money.</li>
           </ul>
@@ -425,7 +426,46 @@
     </div>
   </section>
 
-  <!-- 12 — ARCHITECTURE -->
+  <!-- 12 — FEATURE 6: UNIT-RATE WHAT-IF -->
+  <section class="slide">
+    <div class="wrap">
+      <div class="kicker"><span class="feat-badge">6</span>&nbsp;Unit-Rate What-If</div>
+      <h2>"What if we <span class="grad">renegotiate</span>?"</h2>
+      <p class="q" style="margin-top:20px">"If we get the subcontractor to 299 AED/unit from next period — where does this centre land?"</p>
+
+      <div class="arch" style="grid-template-columns:repeat(3,1fr);margin-top:26px">
+        <div class="layer" style="border-color:var(--blue)">
+          <div class="t"><span class="tag">IN</span> The assumption</div>
+          <p>The QS's rate — <b>not a figure from the sheets</b>. Echoed back with its effective period, so the assumption is auditable.</p>
+        </div>
+        <div class="layer">
+          <div class="t"><span class="tag">ENGINE</span> Reprice remaining</div>
+          <p>Remaining quantity repriced at that rate, <b>holding recent physical pace</b> — a price renegotiation changes cost, not tempo.</p>
+        </div>
+        <div class="layer" style="border-color:var(--green)">
+          <div class="t"><span class="tag">OUT</span> The scenario</div>
+          <p>3-period spend path + cost-to-complete, <b>scenario final cost and VAC</b>. All arithmetic in C#; the model only narrates.</p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:22px;padding:22px 24px">
+        <div class="sub" style="text-transform:uppercase;letter-spacing:.1em;font-weight:700;color:var(--ink3);margin-bottom:14px">The contrast is the point</div>
+        <div style="display:flex;gap:clamp(16px,3vw,40px);flex-wrap:wrap">
+          <div><div class="sub" style="font-size:12.5px">planned</div><div style="font-family:var(--mono);color:var(--ink);font-weight:700;margin-top:5px">BAC ÷ budget qty</div></div>
+          <div><div class="sub" style="font-size:12.5px">realized today</div><div style="font-family:var(--mono);color:var(--ink);font-weight:700;margin-top:5px">AC ÷ earned qty</div></div>
+          <div><div class="sub" style="font-size:12.5px">assumed</div><div style="font-family:var(--mono);color:var(--blue2);font-weight:700;margin-top:5px">the QS's number</div></div>
+        </div>
+      </div>
+
+      <p class="foot-note" style="margin-top:22px;max-width:74ch">
+        <span class="pill amber" style="margin-right:8px">scenario, not a forecast</span>
+        Every figure is a direct arithmetic consequence of the stated assumption — never presented as the
+        validated forecast. For a data-driven number, the copilot routes to the conformal forecaster instead.
+      </p>
+    </div>
+  </section>
+
+  <!-- 13 — ARCHITECTURE -->
   <section class="slide">
     <div class="wrap">
       <div class="kicker">Under the Hood</div>
@@ -443,7 +483,7 @@
     </div>
   </section>
 
-  <!-- 13 — WHY CREDIBLE -->
+  <!-- 14 — WHY CREDIBLE -->
   <section class="slide">
     <div class="wrap">
       <div class="kicker">Why It's Credible</div>
@@ -457,7 +497,7 @@
     </div>
   </section>
 
-  <!-- 14 — CLOSE -->
+  <!-- 15 — CLOSE -->
   <section class="slide">
     <div class="wrap" style="text-align:center">
       <div class="kicker" style="justify-content:center">Thank You</div>
