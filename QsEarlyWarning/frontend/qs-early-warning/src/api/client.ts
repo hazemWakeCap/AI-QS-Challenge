@@ -99,6 +99,50 @@ export interface VarianceBridge {
   assumptionBased: boolean; evidenceNeeded: string | null; notes: string[];
 }
 
+// ── Phase 2: the spatial read-side (3D Cost X-Ray) ──
+export interface ZoneCost {
+  zoneCode: string;
+  bac: number; pv: number; ev: number; ac: number;
+  /** BAC − AC: money in this zone that has not been spent yet — what is still saveable. */
+  unspent: number;
+  /** ΣEV/ΣAC. Null when costSufficient is false — a ratio on 0.7% of a budget is not a verdict. */
+  cpi: number | null;
+  spi: number | null;
+  costSufficient: boolean;
+  alertLevel: "GREEN" | "AMBER" | "NOT_STARTED" | "INSUFFICIENT_COST";
+  centreCount: number;
+  /** AMBER centres inside the zone. Can be > 0 while the zone's own rollup reads GREEN. */
+  amberCount: number;
+  topRiskBccId: string | null;
+  topRiskCpi: number | null;
+}
+
+export interface CostMap {
+  projectSlug: string; period: number; minPeriod: number; maxPeriod: number; currency: string;
+  projectBac: number; projectAc: number;
+  /** Money on centres with no Zone_Area. Σ zones + this === projectBac, always. */
+  unmappedBac: number;
+  unmappedCentreCount: number;
+  unspentInDriftingZones: number;
+  zones: ZoneCost[];
+}
+
+export interface GeometryDimension {
+  key: string; label: string; value: number; unit: string;
+  sourceItemRef: string | null; sourceDescription: string | null; derivation: string;
+}
+
+export interface GeometrySpec {
+  projectSlug: string;
+  floorCount: number; basementLevels: number;
+  footprintWidthM: number; footprintDepthM: number; floorHeightM: number;
+  basementDepthM: number; coreWidthM: number; coreDepthM: number;
+  /** False when the estimate was unavailable and fallback numbers were used. */
+  derived: boolean;
+  provenance: string;
+  dimensions: GeometryDimension[];
+}
+
 export const api = {
   health: () => get<Health>("/api/v1/health"),
   projects: () => get<Project[]>("/api/v1/projects"),
@@ -150,4 +194,7 @@ export const api = {
   // idea-5 variance attribution
   variance: (bcc: string, period: number) =>
     get<VarianceBridge>(`/api/v1/variance?bcc=${encodeURIComponent(bcc)}&period=${period}`),
+  // phase 2: 3D cost x-ray
+  costMap: (period?: number) => get<CostMap>(`/api/v1/model/cost-map${period ? `?period=${period}` : ""}`),
+  geometrySpec: () => get<GeometrySpec>("/api/v1/model/geometry-spec"),
 };

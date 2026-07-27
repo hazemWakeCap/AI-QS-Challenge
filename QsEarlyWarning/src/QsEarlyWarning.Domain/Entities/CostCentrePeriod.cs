@@ -21,6 +21,12 @@ public sealed record CostCentrePeriod
     public string? Discipline { get; init; }
     public required string PackageCode { get; init; }
 
+    /// <summary>
+    /// Physical location tag from the workbook (e.g. STRUCTURE, FLOORS-B2-RF, BASEMENT+EXT).
+    /// The only spatial attribute in the dataset; nullable because older workbooks omit it.
+    /// </summary>
+    public string? ZoneArea { get; init; }
+
     /// <summary>Status label: GREEN | AMBER | CLOSED | NOT STARTED | null.</summary>
     public string? AlertLevel { get; init; }
 

@@ -1,0 +1,116 @@
+import * as THREE from "three";
+import type { ZoneCost } from "../api/client";
+import type { GeneratedTower } from "./towerGenerator";
+import type { Viewer } from "./viewer";
+
+/**
+ * Colour policy for the massing — which cost state reads as which colour.
+ *
+ * Colours come from the app's existing semantic tokens (--good / --warn / --bad), which were
+ * already checked for colour-vision safety, so the model reads the same way as the tables.
+ * The generator applies these at build time; see towerGenerator for why they are not repainted.
+ */
+
+/** GREEN — CPI at or above the 0.95 AMBER threshold. */
+const GOOD = 0x22a56a;
+/** AMBER — CPI below 0.95. */
+const WARN = 0xd99a1c;
+/** A zone carrying AMBER centres while its own rollup still reads green. */
+const MIXED = 0xc98a3c;
+/** Too little money spent to judge — deliberately not green. */
+const UNKNOWN = 0x9aa4b8;
+/** Nothing started. */
+const DORMANT = 0xc3cad6;
+
+/** The app's accent blue — the selected zone, so selection never reads as a cost verdict. */
+const SELECTION_COLOR = 0x2f6fe0;
+
+export type PaintMode = "cpi" | "exposure";
+
+/**
+ * Colour for one zone.
+ *
+ * The `cpi` mode paints the zone's own rollup. It has a known blind spot: FLOORS-ALL reads GREEN
+ * at CPI 0.961 while holding 11 AMBER cost centres and AED 43.5M of unspent budget — aggregation
+ * dilutes trouble. So a green zone that contains AMBER centres is painted MIXED rather than clean
+ * green, and `exposure` mode exists to rank zones by unspent money instead.
+ */
+export function colorFor(zone: ZoneCost, mode: PaintMode, maxUnspent: number): number {
+  if (mode === "exposure") {
+    // Money still at stake, as a ramp from calm to hot. Unspent budget is what a QS can still act on.
+    const t = maxUnspent > 0 ? Math.min(1, zone.unspent / maxUnspent) : 0;
+    const c = new THREE.Color(GOOD).lerp(new THREE.Color(WARN), t);
+    return c.getHex();
+  }
+
+  if (zone.alertLevel === "NOT_STARTED") return DORMANT;
+  if (zone.alertLevel === "INSUFFICIENT_COST") return UNKNOWN;
+  if (zone.alertLevel === "AMBER") return WARN;
+  return zone.amberCount > 0 ? MIXED : GOOD;
+}
+
+export interface LegendRow {
+  label: string;
+  color: number;
+  note: string;
+}
+
+/**
+ * Legend for the active mode.
+ *
+ * The two modes encode completely different things — one categorical, one a continuous ramp — so
+ * they cannot share a key. Showing the CPI categories while the model is ramped by unspent money
+ * would label the picture with a scale it is not using.
+ */
+export function legendFor(mode: PaintMode): LegendRow[] {
+  if (mode === "exposure") {
+    return [
+      { label: "Most unspent", color: WARN, note: "largest budget still to be committed" },
+      { label: "Least unspent", color: GOOD, note: "little budget left in this zone" },
+    ];
+  }
+  return [
+    { label: "Drifting", color: WARN, note: "zone CPI below 0.95" },
+    { label: "Amber inside", color: MIXED, note: "zone reads green, but holds AMBER centres" },
+    { label: "On budget", color: GOOD, note: "zone CPI at or above 0.95" },
+    { label: "Too early to judge", color: UNKNOWN, note: "under 1% of budget spent" },
+    { label: "Not started", color: DORMANT, note: "no work booked" },
+  ];
+}
+
+export const hex = (c: number) => `#${c.toString(16).padStart(6, "0")}`;
+
+/**
+ * Recolours the massing in place.
+ *
+ * Meshes own their materials, so a repaint is a colour assignment — no rebuild, no per-item API.
+ * Zones the cost map does not mention keep DORMANT rather than a cost colour, so geometry can
+ * never imply a verdict the data did not give.
+ */
+export function paintByCost(
+  viewer: Viewer,
+  tower: GeneratedTower,
+  zones: readonly ZoneCost[],
+  mode: PaintMode,
+  selectedZone: string | null,
+): void {
+  const maxUnspent = zones.reduce((m, z) => Math.max(m, z.unspent), 0);
+
+  const colorByZone = new Map<string, number>();
+  for (const z of zones) {
+    colorByZone.set(z.zoneCode, colorFor(z, mode, maxUnspent));
+  }
+
+  for (const [zoneCode, meshes] of tower.byZone) {
+    const color = zoneCode === selectedZone
+      ? SELECTION_COLOR
+      : colorByZone.get(zoneCode) ?? DORMANT;
+    for (const mesh of meshes) {
+      (mesh.material as THREE.MeshLambertMaterial).color.setHex(color);
+    }
+  }
+
+  // The world renders on demand, so a colour change is invisible until the renderer is asked to
+  // draw again. Without this the model keeps whatever colours were on screen when it last drew.
+  viewer.world.renderer!.needsUpdate = true;
+}

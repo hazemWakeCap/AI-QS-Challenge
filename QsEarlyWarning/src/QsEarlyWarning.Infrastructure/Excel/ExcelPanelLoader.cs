@@ -74,6 +74,7 @@ public sealed class ExcelPanelLoader : IPanelLoader
                 WbsCode = Str(ws, r, col, "WBS_Code"),
                 Discipline = Str(ws, r, col, "Discipline"),
                 PackageCode = pkg,
+                ZoneArea = Str(ws, r, col, "Zone_Area"),
                 AlertLevel = alert,
                 BacAed = Num(ws, r, col, "BAC_AED"),
                 BudgetQty = Num(ws, r, col, "Budget_Qty"),

@@ -86,11 +86,17 @@ public sealed class WorkbookImporter : IWorkbookImporter
                 var any = g.First();
                 var start = g.Min(x => x.PeriodId);
                 var end = g.Max(x => x.PeriodId);
+                // Zone_Area is constant per centre in this workbook, but take the first non-blank
+                // rather than any.ZoneArea so a blank leading row can't null out a located centre.
+                var zone = g.Select(x => x.ZoneArea)
+                    .FirstOrDefault(z => !string.IsNullOrWhiteSpace(z));
+
                 var cc = InsertReturning(conn, tx,
                     "INSERT INTO qs.cost_centres (project_id, bcc_id, wbs_code, package_code, discipline, " +
-                    "effective_start_period, effective_end_period) VALUES (@p, @b, @w, @k, @d, @s, @e) RETURNING id",
+                    "zone_code, effective_start_period, effective_end_period) " +
+                    "VALUES (@p, @b, @w, @k, @d, @z, @s, @e) RETURNING id",
                     Big("@p", projectId), Txt("@b", g.Key), Txt("@w", any.WbsCode), Txt("@k", any.PackageCode),
-                    Txt("@d", any.Discipline), Intg("@s", start), Intg("@e", end));
+                    Txt("@d", any.Discipline), Txt("@z", zone), Intg("@s", start), Intg("@e", end));
                 ccId[g.Key] = cc;
 
                 var bac = g.Select(x => x.BacAed).FirstOrDefault(v => v is not null) ?? 0.0;

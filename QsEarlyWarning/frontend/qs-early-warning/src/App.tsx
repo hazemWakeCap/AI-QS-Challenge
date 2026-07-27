@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { api, session, type Health, type Project, type CostCentreEvm } from "./api/client";
 import { EvmOverview } from "./components/EvmOverview";
 import { CostCentreGrid } from "./components/CostCentreGrid";
@@ -15,14 +15,19 @@ import { StressTest } from "./components/StressTest";
 import { VarianceCard } from "./components/VarianceCard";
 import { CostCentreDetail } from "./components/CostCentreDetail";
 import { Drawer } from "./components/Drawer";
+// That Open + three are ~5 MB of the bundle and only one of the tabs needs them, so the 3D view
+// is split out and fetched when the tab is first opened. Keeps first paint on the other 12 tabs
+// exactly where it was before this feature existed.
+const ModelView = lazy(() => import("./components/ModelView").then((m) => ({ default: m.ModelView })));
 import { ProjectsAdmin } from "./components/ProjectsAdmin";
-import { EmptyState } from "./components/Loading";
+import { EmptyState, Spinner } from "./components/Loading";
 
-type Tab = "copilot" | "overview" | "centres" | "capture" | "workflow" | "data" | "watchlist" | "proof" | "forecast" | "stress" | "validation" | "projects";
+type Tab = "copilot" | "overview" | "centres" | "model" | "capture" | "workflow" | "data" | "watchlist" | "proof" | "forecast" | "stress" | "validation" | "projects";
 const TABS: { id: Tab; label: string; featured?: boolean }[] = [
   { id: "copilot", label: "AI Assistant", featured: true },
   { id: "overview", label: "EVM Overview" },
   { id: "centres", label: "Cost Centres" },
+  { id: "model", label: "3D Cost X-Ray" },
   { id: "capture", label: "Monthly Capture" },
   { id: "workflow", label: "Periods & Estimate" },
   { id: "data", label: "Data Admin" },
@@ -138,17 +143,22 @@ export default function App() {
           <>
             {tab === "overview" && <section className="card"><EvmOverview period={period} rev={rev} currency={cur} /></section>}
             {tab === "centres" && (
-              <>
-                <section className="card">
-                  <CostCentreGrid period={period} rev={rev} currency={cur}
-                                  onSelect={setSelectedCentre} selectedBcc={selectedCentre?.bccId ?? null} />
-                </section>
-                <Drawer open={!!selectedCentre} onClose={() => setSelectedCentre(null)}
-                        title={<span className="mono">Cost Centre · {selectedCentre?.bccId}</span>}>
-                  {selectedCentre && <CostCentreDetail centre={selectedCentre} period={period} currency={cur} />}
-                </Drawer>
-              </>
+              <section className="card">
+                <CostCentreGrid period={period} rev={rev} currency={cur}
+                                onSelect={setSelectedCentre} selectedBcc={selectedCentre?.bccId ?? null} />
+              </section>
             )}
+            {tab === "model" && (
+              <Suspense fallback={<section className="card"><Spinner /></section>}>
+                <ModelView period={period} rev={rev} onSelectCentre={setSelectedCentre} />
+              </Suspense>
+            )}
+            {/* Shared cost-centre inspector: opened from the grid AND from a zone in the 3D view,
+                so the model is a new way into the existing product rather than a parallel one. */}
+            <Drawer open={!!selectedCentre} onClose={() => setSelectedCentre(null)}
+                    title={<span className="mono">Cost Centre · {selectedCentre?.bccId}</span>}>
+              {selectedCentre && <CostCentreDetail centre={selectedCentre} period={period} currency={cur} />}
+            </Drawer>
             {tab === "capture" && <section className="card narrow"><CapturePanel period={period} rev={rev} onChanged={refresh} /></section>}
             {tab === "workflow" && <section className="card narrow"><PeriodsPanel rev={rev} onChanged={refresh} activeVersionId={project?.activeEstimateVersionId ?? null} /></section>}
             {tab === "data" && <section className="card"><DataAdmin rev={rev} onChanged={refresh} /></section>}

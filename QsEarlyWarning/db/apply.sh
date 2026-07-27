@@ -43,6 +43,8 @@ SET ROLE qs_owner;
 \i $MIG/0008_estimate_immutability.sql
 \echo == 0009 dashboard ==
 \i $MIG/0009_dashboard.sql
+\echo == 0010 zones ==
+\i $MIG/0010_zones.sql
 RESET ROLE;
 SQL
 

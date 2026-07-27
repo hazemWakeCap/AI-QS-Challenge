@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using QsEarlyWarning.Core.Evaluation;
 using QsEarlyWarning.Core.Forecasting;
+using QsEarlyWarning.Core.Model;
 using QsEarlyWarning.Core.StressTest;
 using QsEarlyWarning.Domain.Entities;
 using QsEarlyWarning.Domain.Estimate;
@@ -34,6 +35,9 @@ public sealed record ProjectSnapshot
     /// resource type, EP- packages only) for the variance-attribution bridge. Null unless this is the
     /// estimate's owning project. A computed aggregate, never raw estimate rows.</summary>
     public IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>>? ResourceMix { get; init; }
+    /// <summary>Phase 2: the massing derived from the BOQ, with the provenance of every dimension.
+    /// Null unless this is the estimate's owning project. A computed spec, never raw estimate rows.</summary>
+    public TowerSpec? Geometry { get; init; }
 
     public int RowCount => Panel.Count;
     public int CentreCount => Panel.Select(p => p.BccId).Distinct(StringComparer.Ordinal).Count();
@@ -136,6 +140,7 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
         // (gated by project id). Degrade gracefully like the forecaster.
         StressTestReport? stressTest = null;
         IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>>? resourceMix = null;
+        TowerSpec? geometry = null;
         try
         {
             var estimate = _estimate?.TryLoadForProject(projectId);
@@ -143,9 +148,10 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
             {
                 stressTest = new EstimateStressTester().Run(estimate, panel);
                 resourceMix = BuildResourceMix(estimate);   // Idea-5: per-package resource-cost shares
+                geometry = TowerSpecDeriver.Derive(estimate); // Phase 2: derived massing + provenance
             }
         }
-        catch { /* stress test / mix unavailable for this project; leave null */ }
+        catch { /* stress test / mix / geometry unavailable for this project; leave null */ }
 
         return new ProjectSnapshot
         {
@@ -160,6 +166,7 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
             ForecastBacktest = backtest,
             StressTest = stressTest,
             ResourceMix = resourceMix,
+            Geometry = geometry,
         };
     }
 

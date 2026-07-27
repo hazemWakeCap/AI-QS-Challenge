@@ -42,15 +42,19 @@ public sealed class PostgresPanelLoader : IProjectPanelSource, IAsyncDisposable
         await Exec(conn, tx, "SELECT set_config('app.current_project_id', @p, true)", ct,
             new NpgsqlParameter("p", NpgsqlDbType.Text) { Value = projectId.ToString() });
 
+        // zone_code is a cost-centre DIMENSION attribute, not an EVM figure, so it is joined from
+        // qs.cost_centres rather than added to the computed-EVM view (0003 stays the single source
+        // of truth for money). RLS applies to both relations under the GUCs set above.
         const string sql = """
-            SELECT bcc_id, period_id, discipline, package_code, wbs_code, alert_level,
-                   bac_amount, planned_pct, pv_amount, actual_pct_complete, ev_amount, earned_qty,
-                   ac_total_amount, cpi, spi, cv_amount, eac_amount, vac_amount, pct_budget_consumed,
-                   ac_material_amount, ac_manpower_amount, ac_equipment_amount, ac_subcontract_amount,
-                   budget_qty
-            FROM qs.cost_centre_evm
-            WHERE project_id = @proj
-            ORDER BY bcc_id, period_id
+            SELECT e.bcc_id, e.period_id, e.discipline, e.package_code, e.wbs_code, e.alert_level,
+                   e.bac_amount, e.planned_pct, e.pv_amount, e.actual_pct_complete, e.ev_amount, e.earned_qty,
+                   e.ac_total_amount, e.cpi, e.spi, e.cv_amount, e.eac_amount, e.vac_amount, e.pct_budget_consumed,
+                   e.ac_material_amount, e.ac_manpower_amount, e.ac_equipment_amount, e.ac_subcontract_amount,
+                   e.budget_qty, c.zone_code
+            FROM qs.cost_centre_evm e
+            JOIN qs.cost_centres    c ON c.project_id = e.project_id AND c.id = e.cost_centre_id
+            WHERE e.project_id = @proj
+            ORDER BY e.bcc_id, e.period_id
             """;
 
         var rows = new List<CostCentrePeriod>();
@@ -86,6 +90,7 @@ public sealed class PostgresPanelLoader : IProjectPanelSource, IAsyncDisposable
                     AcEquipment = Dbl(rd, 21),
                     AcSubcontract = Dbl(rd, 22),
                     BudgetQty = Dbl(rd, 23),
+                    ZoneArea = Str(rd, 24),
                     // Unit is not exposed by the EVM view; left null on the DB path (best-effort label only).
                     // Rolling3mCpi / VariancePct / EacVsBacRatio are recorded-only signals not used by
                     // the scorer; left null (the ranking depends solely on gap + cpi).
