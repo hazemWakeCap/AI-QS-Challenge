@@ -1,0 +1,4 @@
+
+# web-ifc wasm is copied from node_modules by scripts/copy-wasm.mjs on postinstall —
+# version-matched to the installed package rather than committed and left to drift.
+public/wasm/

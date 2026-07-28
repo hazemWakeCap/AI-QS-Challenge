@@ -499,3 +499,10 @@ tr.selected td { background: var(--accent-weak); box-shadow: inset 3px 0 0 var(-
   .model-canvas { height: 380px; }
 }
 .kpis-2 { grid-template-columns: repeat(2, 1fr); }
+
+/* File picker styled as a button — the native input is hidden, not removed, so it stays keyboard
+   reachable and the label remains its accessible name. */
+.file-pick { position: relative; overflow: hidden; cursor: pointer; }
+.file-pick input[type="file"] { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+.file-pick input[type="file"]:disabled { cursor: not-allowed; }
+.model-loading p { margin: var(--sp-2) 0 0; }

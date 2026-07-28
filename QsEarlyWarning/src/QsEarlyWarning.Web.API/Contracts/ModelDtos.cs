@@ -93,6 +93,61 @@ public sealed record GeometryDimensionDto(
     string? SourceDescription,
     string Derivation);
 
+// ── Model take-off pricing ────────────────────────────────────────────────────
+
+/// <summary>One measured quantity posted from the viewer.</summary>
+/// <param name="IfcClass">Upper-case IFC entity name, e.g. IFCCOLUMN.</param>
+/// <param name="Measure">"volume" or "area".</param>
+/// <param name="Quantity">Measured amount, in m³ or m².</param>
+/// <param name="ElementCount">Elements that contributed the measurement.</param>
+/// <param name="UnmeasuredCount">Elements of this class carrying no such measurement.</param>
+public sealed record TakeoffLineRequest(
+    string IfcClass,
+    string Measure,
+    double Quantity,
+    int ElementCount,
+    int UnmeasuredCount);
+
+/// <summary>A take-off measured off a model, awaiting a price.</summary>
+/// <param name="Lines">The measured quantities, aggregated by IFC class.</param>
+/// <param name="ModelElementCount">How many elements the model contains in total. Reported
+/// independently of the lines so the response's tie-out can actually catch elements that fell
+/// out of the take-off, rather than comparing a sum against itself.</param>
+public sealed record PriceTakeoffRequest(
+    IReadOnlyList<TakeoffLineRequest> Lines,
+    int ModelElementCount);
+
+public sealed record PricedLineDto(
+    string IfcClass, string Measure, double Quantity, string Unit, int ElementCount,
+    string BoqItemRef, string? BoqDescription, double UnitRate, decimal Amount, string Rationale);
+
+public sealed record UnpricedLineDto(
+    string IfcClass, string Measure, double Quantity, int ElementCount, string Reason);
+
+public sealed record TakeoffRuleDto(
+    string IfcClass, string Measure, string Unit, string BoqItemRef, string Rationale);
+
+/// <summary>
+/// A priced model take-off.
+///
+/// <para><see cref="PricedAmount"/> must never be shown alone. It is the cost of the part of the
+/// building that could be both measured and priced; the unpriced list is what it excludes, and the
+/// element counts tie out so nothing can quietly vanish between them.</para>
+/// </summary>
+public sealed record TakeoffPricingDto(
+    string ProjectSlug,
+    string Currency,
+    decimal PricedAmount,
+    IReadOnlyList<PricedLineDto> Priced,
+    IReadOnlyList<UnpricedLineDto> Unpriced,
+    int TotalElements,
+    int PricedElements,
+    int UnpricedElements,
+    int UnmeasuredElements,
+    bool TiesOut,
+    IReadOnlyList<TakeoffRuleDto> RulesApplied,
+    string RateBasis);
+
 /// <summary>The parametric massing spec plus the provenance table that justifies it.</summary>
 public sealed record GeometrySpecDto(
     string ProjectSlug,

@@ -143,6 +143,45 @@ export interface GeometrySpec {
   dimensions: GeometryDimension[];
 }
 
+// ── Phase 2: model take-off priced with this project's rate library ──
+export interface TakeoffLineRequest {
+  ifcClass: string;
+  measure: "volume" | "area";
+  quantity: number;
+  elementCount: number;
+  unmeasuredCount: number;
+}
+
+export interface PricedLine {
+  ifcClass: string; measure: string; quantity: number; unit: string; elementCount: number;
+  boqItemRef: string; boqDescription: string | null; unitRate: number; amount: number; rationale: string;
+}
+
+export interface UnpricedLine {
+  ifcClass: string; measure: string; quantity: number; elementCount: number; reason: string;
+}
+
+export interface TakeoffRule {
+  ifcClass: string; measure: string; unit: string; boqItemRef: string; rationale: string;
+}
+
+export interface TakeoffPricing {
+  projectSlug: string;
+  currency: string;
+  /** Cost of the part that could be measured AND priced. Meaningless without `unpriced`. */
+  pricedAmount: number;
+  priced: PricedLine[];
+  unpriced: UnpricedLine[];
+  totalElements: number;
+  pricedElements: number;
+  unpricedElements: number;
+  unmeasuredElements: number;
+  /** priced + unpriced + unmeasured === totalElements. False means elements went missing. */
+  tiesOut: boolean;
+  rulesApplied: TakeoffRule[];
+  rateBasis: string;
+}
+
 export const api = {
   health: () => get<Health>("/api/v1/health"),
   projects: () => get<Project[]>("/api/v1/projects"),
@@ -197,4 +236,6 @@ export const api = {
   // phase 2: 3D cost x-ray
   costMap: (period?: number) => get<CostMap>(`/api/v1/model/cost-map${period ? `?period=${period}` : ""}`),
   geometrySpec: () => get<GeometrySpec>("/api/v1/model/geometry-spec"),
+  priceTakeoff: (lines: TakeoffLineRequest[], modelElementCount: number) =>
+    post<TakeoffPricing>("/api/v1/model/price-takeoff", { lines, modelElementCount }),
 };

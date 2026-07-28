@@ -19,15 +19,17 @@ import { Drawer } from "./components/Drawer";
 // is split out and fetched when the tab is first opened. Keeps first paint on the other 12 tabs
 // exactly where it was before this feature existed.
 const ModelView = lazy(() => import("./components/ModelView").then((m) => ({ default: m.ModelView })));
+const IfcTakeoff = lazy(() => import("./components/IfcTakeoff").then((m) => ({ default: m.IfcTakeoff })));
 import { ProjectsAdmin } from "./components/ProjectsAdmin";
 import { EmptyState, Spinner } from "./components/Loading";
 
-type Tab = "copilot" | "overview" | "centres" | "model" | "capture" | "workflow" | "data" | "watchlist" | "proof" | "forecast" | "stress" | "validation" | "projects";
+type Tab = "copilot" | "overview" | "centres" | "model" | "ifc" | "capture" | "workflow" | "data" | "watchlist" | "proof" | "forecast" | "stress" | "validation" | "projects";
 const TABS: { id: Tab; label: string; featured?: boolean }[] = [
   { id: "copilot", label: "AI Assistant", featured: true },
   { id: "overview", label: "EVM Overview" },
   { id: "centres", label: "Cost Centres" },
   { id: "model", label: "3D Cost X-Ray" },
+  { id: "ifc", label: "IFC Take-off" },
   { id: "capture", label: "Monthly Capture" },
   { id: "workflow", label: "Periods & Estimate" },
   { id: "data", label: "Data Admin" },
@@ -151,6 +153,11 @@ export default function App() {
             {tab === "model" && (
               <Suspense fallback={<section className="card"><Spinner /></section>}>
                 <ModelView period={period} rev={rev} onSelectCentre={setSelectedCentre} />
+              </Suspense>
+            )}
+            {tab === "ifc" && (
+              <Suspense fallback={<section className="card"><Spinner /></section>}>
+                <IfcTakeoff />
               </Suspense>
             )}
             {/* Shared cost-centre inspector: opened from the grid AND from a zone in the 3D view,

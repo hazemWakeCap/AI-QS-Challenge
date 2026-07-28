@@ -103,6 +103,70 @@ public sealed class ModelController : ControllerBase
                 d.Key, d.Label, d.Value, d.Unit, d.SourceItemRef, d.SourceDescription, d.Derivation)).ToList()));
     }
 
+    /// <summary>Prices a take-off measured off any model with this project's unit-rate library.</summary>
+    [HttpPost("price-takeoff")]
+    public async Task<ActionResult<TakeoffPricingDto>> PriceTakeoff(
+        [FromBody] PriceTakeoffRequest request, CancellationToken ct = default)
+    {
+        var res = await Resolve(ct);
+        if (res.Error is not null) return res.Error;
+        var (project, snapshot) = (res.Project!, res.Snapshot!);
+
+        if (request?.Lines is null || request.Lines.Count == 0)
+            return BadRequest("Provide at least one measured line.");
+        if (request.Lines.Count > 500)
+            return BadRequest("Too many lines; aggregate by IFC class before pricing.");
+
+        var rates = snapshot.Rates;
+        if (rates is null)
+            return NotFound($"Project '{project.Slug}' has no rate library (no estimate loaded).");
+
+        var lines = new List<TakeoffLine>(request.Lines.Count);
+        foreach (var l in request.Lines)
+        {
+            if (string.IsNullOrWhiteSpace(l.IfcClass))
+                return BadRequest("Every line needs an ifcClass.");
+            if (!TryMeasure(l.Measure, out var measure))
+                return BadRequest($"measure must be 'volume' or 'area'; got '{l.Measure}'.");
+            if (!double.IsFinite(l.Quantity))
+                return BadRequest($"Quantity for {l.IfcClass} is not a finite number.");
+
+            lines.Add(new TakeoffLine(
+                l.IfcClass.Trim().ToUpperInvariant(), measure, l.Quantity,
+                Math.Max(0, l.ElementCount), Math.Max(0, l.UnmeasuredCount)));
+        }
+
+        var result = TakeoffPricer.Price(lines, rates, project.ReportingCurrency, request.ModelElementCount);
+
+        return Ok(new TakeoffPricingDto(
+            project.Slug,
+            result.Currency,
+            Math.Round((decimal)result.PricedAmount, 2),
+            result.Priced.Select(p => new PricedLineDto(
+                p.IfcClass, Label(p.Measure), p.Quantity, p.Unit, p.ElementCount,
+                p.BoqItemRef, p.BoqDescription, p.UnitRate, Math.Round((decimal)p.Amount, 2), p.Rationale)).ToList(),
+            result.Unpriced.Select(u => new UnpricedLineDto(
+                u.IfcClass, Label(u.Measure), u.Quantity, u.ElementCount, u.Reason)).ToList(),
+            result.TotalElements, result.PricedElements, result.UnpricedElements, result.UnmeasuredElements,
+            result.TiesOut,
+            result.RulesApplied.Select(r => new TakeoffRuleDto(
+                r.IfcClass, Label(r.Measure), r.Unit, r.BoqItemRef, r.Rationale)).ToList(),
+            RateBasis: "Direct + indirect unit cost from this project's BOQ. Margin and contingency "
+                     + "are excluded — they are commercial positions taken per project, not transferable rates."));
+    }
+
+    private static bool TryMeasure(string? value, out TakeoffMeasure measure)
+    {
+        switch ((value ?? "").Trim().ToLowerInvariant())
+        {
+            case "volume": measure = TakeoffMeasure.Volume; return true;
+            case "area": measure = TakeoffMeasure.Area; return true;
+            default: measure = TakeoffMeasure.Volume; return false;
+        }
+    }
+
+    private static string Label(TakeoffMeasure m) => m == TakeoffMeasure.Volume ? "volume" : "area";
+
     // ── zone rollup ───────────────────────────────────────────────────────────────
 
     private static ZoneCostDto BuildZone(string zoneCode, IReadOnlyList<CostCentrePeriod> centres)

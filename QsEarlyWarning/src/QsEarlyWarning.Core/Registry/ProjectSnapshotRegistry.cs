@@ -38,6 +38,9 @@ public sealed record ProjectSnapshot
     /// <summary>Phase 2: the massing derived from the BOQ, with the provenance of every dimension.
     /// Null unless this is the estimate's owning project. A computed spec, never raw estimate rows.</summary>
     public TowerSpec? Geometry { get; init; }
+    /// <summary>Phase 2: the unit-rate library projected from the BOQ, used to price a take-off
+    /// measured off any model. Null unless this is the estimate's owning project.</summary>
+    public RateBook? Rates { get; init; }
 
     public int RowCount => Panel.Count;
     public int CentreCount => Panel.Select(p => p.BccId).Distinct(StringComparer.Ordinal).Count();
@@ -141,6 +144,7 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
         StressTestReport? stressTest = null;
         IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>>? resourceMix = null;
         TowerSpec? geometry = null;
+        RateBook? rates = null;
         try
         {
             var estimate = _estimate?.TryLoadForProject(projectId);
@@ -149,6 +153,7 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
                 stressTest = new EstimateStressTester().Run(estimate, panel);
                 resourceMix = BuildResourceMix(estimate);   // Idea-5: per-package resource-cost shares
                 geometry = TowerSpecDeriver.Derive(estimate); // Phase 2: derived massing + provenance
+                rates = RateBook.From(estimate);             // Phase 2: rate library for model take-off
             }
         }
         catch { /* stress test / mix / geometry unavailable for this project; leave null */ }
@@ -167,6 +172,7 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
             StressTest = stressTest,
             ResourceMix = resourceMix,
             Geometry = geometry,
+            Rates = rates,
         };
     }
 
