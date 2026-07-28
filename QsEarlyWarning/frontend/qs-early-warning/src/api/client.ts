@@ -62,7 +62,16 @@ export interface CopilotEvidence { tool: string; detail: string; sources: Copilo
 export interface CopilotAskResponse { answer: string; refused: boolean; evidence: CopilotEvidence[]; }
 export interface FoldMetric { periodId: number; k: number; kEffective: number; eligible: number; positives: number; truePositives: number; falsePositives: number; falseNegatives: number; precision: number | null; recall: number | null; }
 export interface ScorerReport { scorerLabel: string; k: number; macroPrecision: number | null; macroRecall: number | null; precisionMin: number | null; precisionMax: number | null; falseAlertsPerCycle: number; folds: FoldMetric[]; }
-export interface ValidationSummary { provenance: string; scorer: string; scorerVersion: string; featureSchemaVersion: string; evaluationOriginMin: number; evaluationOriginMax: number; foldCount: number; totalTransitions: number; rule: ScorerReport[]; cpiNative: ScorerReport[]; }
+export interface ZoneComposition { zoneArea: string; centreCount: number; disciplineCount: number; disciplines: string[]; }
+/** Whether zone carries information discipline does not — the reason the spatial claim was withdrawn. */
+export interface Collinearity {
+  zoneCount: number; disciplineCount: number;
+  singleDisciplineZones: number; disciplinesSpanningZones: number;
+  zoneIsProxyForDiscipline: boolean;
+  mostMixedZone: string | null; mostMixedZoneDisciplines: number;
+  verdict: string; zones: ZoneComposition[];
+}
+export interface ValidationSummary { provenance: string; scorer: string; scorerVersion: string; featureSchemaVersion: string; evaluationOriginMin: number; evaluationOriginMax: number; foldCount: number; totalTransitions: number; rule: ScorerReport[]; cpiNative: ScorerReport[]; challenger?: ScorerReport[] | null; collinearity?: Collinearity | null; decisionsPerScorer?: number; }
 export interface EntityColumn { name: string; kind: "Text" | "Numeric" | "Int" | "Bigint" | "Bool" | "Date"; insertable: boolean; updatable: boolean; required: boolean; fkEntity: string | null; enum: string[] | null; }
 export interface EntityCaps { list: boolean; get: boolean; create: boolean; update: boolean; delete: boolean; }
 export interface EntityMeta { key: string; display: string; table: string; naturalKey: string[]; caps: EntityCaps;

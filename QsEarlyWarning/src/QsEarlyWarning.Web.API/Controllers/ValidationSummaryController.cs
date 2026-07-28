@@ -34,7 +34,26 @@ public sealed class ValidationSummaryController : ControllerBase
             FoldCount: s.FoldCount,
             TotalTransitions: s.TotalTransitions,
             Rule: s.Rule.Select(Map).ToList(),
-            CpiNative: s.CpiNative.Select(Map).ToList()));
+            CpiNative: s.CpiNative.Select(Map).ToList(),
+            Challenger: s.Challenger?.Select(Map).ToList(),
+            Collinearity: MapCollinearity(_provider.Current.Panel),
+            DecisionsPerScorer: s.FoldCount * Domain.Constants.EvmThresholds.SelectionK));
+    }
+
+    /// <summary>
+    /// Measured from the panel on every request rather than cached, so the published verdict can
+    /// never drift away from the data actually loaded.
+    /// </summary>
+    private static CollinearityDto? MapCollinearity(IReadOnlyList<Domain.Entities.CostCentrePeriod> panel)
+    {
+        var c = ZoneDisciplineCollinearity.Measure(panel);
+        if (c.ZoneCount == 0) return null;   // workbook carries no zone column
+
+        return new CollinearityDto(
+            c.ZoneCount, c.DisciplineCount, c.SingleDisciplineZones, c.DisciplinesSpanningZones,
+            c.ZoneIsProxyForDiscipline, c.MostMixedZone, c.MostMixedZoneDisciplines, c.Verdict,
+            c.Zones.Select(z => new ZoneCompositionDto(
+                z.ZoneArea, z.CentreCount, z.DisciplineCount, z.Disciplines)).ToList());
     }
 
     private static ScorerReportDto Map(ScorerReport r) => new(

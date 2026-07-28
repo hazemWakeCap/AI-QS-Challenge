@@ -31,6 +31,28 @@ public sealed record ScorerReportDto(
     double FalseAlertsPerCycle,
     IReadOnlyList<FoldMetricDto> Folds);
 
+/// <summary>One zone and the trades inside it — evidence for the collinearity verdict.</summary>
+public sealed record ZoneCompositionDto(
+    string ZoneArea, int CentreCount, int DisciplineCount, IReadOnlyList<string> Disciplines);
+
+/// <summary>
+/// Whether this project's zones carry information its disciplines do not.
+///
+/// <para>Published because it is the reason the spatial claim was withdrawn: if no discipline spans
+/// more than one zone, a "zone-neighbour" feature measures trade, and calling its result spatial
+/// would be false however good the number looked.</para>
+/// </summary>
+public sealed record CollinearityDto(
+    int ZoneCount,
+    int DisciplineCount,
+    int SingleDisciplineZones,
+    int DisciplinesSpanningZones,
+    bool ZoneIsProxyForDiscipline,
+    string? MostMixedZone,
+    int MostMixedZoneDisciplines,
+    string Verdict,
+    IReadOnlyList<ZoneCompositionDto> Zones);
+
 public sealed record ValidationSummaryDto(
     string Provenance,
     string Scorer,
@@ -41,7 +63,12 @@ public sealed record ValidationSummaryDto(
     int FoldCount,
     int TotalTransitions,
     IReadOnlyList<ScorerReportDto> Rule,
-    IReadOnlyList<ScorerReportDto> CpiNative);
+    IReadOnlyList<ScorerReportDto> CpiNative,
+    /// <summary>Descriptive peer challengers, evaluated on identical folds. Never deployed from here.</summary>
+    IReadOnlyList<ScorerReportDto>? Challenger = null,
+    CollinearityDto? Collinearity = null,
+    /// <summary>How many ranked slots the headline rests on (folds x k) — the honest sample size.</summary>
+    int DecisionsPerScorer = 0);
 
 public sealed record CopilotTurnDto(string Role, string Text);
 

@@ -24,6 +24,62 @@ public sealed record PairingResult
 /// </summary>
 public sealed class FeatureBuilder
 {
+    /// <summary>
+    /// Live centres grouped by (period, zone) — the neighbourhood a peer feature draws on.
+    ///
+    /// "Live" means the centre is actually spending: GREEN or AMBER with a finite CPI. NOT STARTED
+    /// and CLOSED rows are excluded because a dormant neighbour carries no information about how
+    /// the neighbourhood is performing, and a closed one is no longer at risk.
+    /// </summary>
+    private sealed class PeerIndex
+    {
+        private readonly Dictionary<(int Period, string Zone), List<CostCentrePeriod>> _byZone = new();
+
+        public PeerIndex(IReadOnlyList<CostCentrePeriod> panel)
+        {
+            foreach (var r in panel)
+            {
+                if (string.IsNullOrWhiteSpace(r.ZoneArea)) continue;
+                if (r.Cpi is not double cpi || !double.IsFinite(cpi)) continue;
+                if (!IsLive(r.AlertLevel)) continue;
+
+                var key = (r.PeriodId, r.ZoneArea!.Trim().ToUpperInvariant());
+                if (!_byZone.TryGetValue(key, out var list))
+                    _byZone[key] = list = new List<CostCentrePeriod>();
+                list.Add(r);
+            }
+        }
+
+        /// <summary>
+        /// Aggregate CPI of the neighbourhood, excluding <paramref name="self"/> and — when
+        /// <paramref name="crossTradeOnly"/> — every centre of the same discipline.
+        /// Returns (null, 0) when there is no neighbourhood to judge.
+        /// </summary>
+        public (double? Cpi, int Count) PeerCpi(CostCentrePeriod self, bool crossTradeOnly)
+        {
+            if (string.IsNullOrWhiteSpace(self.ZoneArea)) return (null, 0);
+            var key = (self.PeriodId, self.ZoneArea!.Trim().ToUpperInvariant());
+            if (!_byZone.TryGetValue(key, out var zone)) return (null, 0);
+
+            double ev = 0, ac = 0;
+            int n = 0;
+            foreach (var peer in zone)
+            {
+                if (string.Equals(peer.BccId, self.BccId, StringComparison.Ordinal)) continue;   // leave-one-out
+                if (crossTradeOnly && Eq(peer.Discipline, self.Discipline ?? "")) continue;
+
+                ev += peer.EvAed ?? 0;
+                ac += peer.AcCumulative ?? 0;
+                n++;
+            }
+
+            if (n == 0 || ac <= 0) return (null, n);
+            return (ev / ac, n);
+        }
+
+        private static bool IsLive(string? alert) => Eq(alert, "GREEN") || Eq(alert, "AMBER");
+    }
+
     /// <summary>Builds pairs for a single feature period p across all centres.</summary>
     public PairingResult BuildPairsForPeriod(IReadOnlyList<CostCentrePeriod> panel, int p)
     {
@@ -31,6 +87,7 @@ public sealed class FeatureBuilder
             .GroupBy(r => r.BccId, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.ToDictionary(r => r.PeriodId), StringComparer.Ordinal);
 
+        var peers = new PeerIndex(panel);
         var pairs = new List<TransitionPair>();
         var excluded = 0;
 
@@ -57,7 +114,7 @@ public sealed class FeatureBuilder
                 continue;
             }
 
-            pairs.Add(Engineer(cur, isAmber, periods));
+            pairs.Add(Engineer(cur, isAmber, periods, peers));
         }
 
         return new PairingResult { Pairs = pairs, ExcludedCount = excluded };
@@ -74,12 +131,13 @@ public sealed class FeatureBuilder
             .GroupBy(r => r.BccId, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.ToDictionary(r => r.PeriodId), StringComparer.Ordinal);
 
+        var peers = new PeerIndex(panel);
         var rows = new List<TransitionPair>();
         foreach (var (_, periods) in byBcc)
         {
             if (!periods.TryGetValue(p, out var cur) || !cur.IsScoreableGreen)
                 continue;
-            rows.Add(Engineer(cur, label: false, periods)); // label unused for scoring
+            rows.Add(Engineer(cur, label: false, periods, peers)); // label unused for scoring
         }
         return rows;
     }
@@ -98,7 +156,8 @@ public sealed class FeatureBuilder
         return new PairingResult { Pairs = all, ExcludedCount = excluded };
     }
 
-    private static TransitionPair Engineer(CostCentrePeriod cur, bool label, Dictionary<int, CostCentrePeriod> periods)
+    private static TransitionPair Engineer(
+        CostCentrePeriod cur, bool label, Dictionary<int, CostCentrePeriod> periods, PeerIndex peers)
     {
         var p = cur.PeriodId;
         double gap = cur.Gap!.Value;
@@ -112,12 +171,16 @@ public sealed class FeatureBuilder
         double? Share(double? part) =>
             part is double v && acCum is double d && d != 0 ? v / d : null;
 
+        var (peerCpi, peerCount) = peers.PeerCpi(cur, crossTradeOnly: false);
+        var (crossCpi, crossCount) = peers.PeerCpi(cur, crossTradeOnly: true);
+
         return new TransitionPair
         {
             BccId = cur.BccId,
             PeriodId = p,
             Discipline = cur.Discipline,
             PackageCode = cur.PackageCode,
+            ZoneArea = cur.ZoneArea,
             Label = label,
             Cpi = cur.Cpi!.Value,
             Rolling3mCpi = cur.Rolling3mCpi,
@@ -128,6 +191,10 @@ public sealed class FeatureBuilder
             DCpi1 = dCpi1,
             DGap1 = dGap1,
             DCpi2 = dCpi2,
+            PeerCpi = peerCpi,
+            PeerCount = peerCount,
+            PeerCpiCrossTrade = crossCpi,
+            CrossTradePeerCount = crossCount,
             ShareMaterial = Share(cur.AcMaterial),
             ShareManpower = Share(cur.AcManpower),
             ShareEquipment = Share(cur.AcEquipment),

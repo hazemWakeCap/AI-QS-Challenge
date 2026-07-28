@@ -47,6 +47,12 @@ public sealed class RollingOriginEvaluator
         foreach (var (label, _) in CpiNativeScorers.All)
             cpiFolds[label] = EvmThresholds.TopK.ToDictionary(k => k, _ => new List<FoldMetrics>());
 
+        // Peer challengers ride the SAME loop, the same train prefix and the same test fold as the
+        // rule, so the folds are provably identical and the comparison needs no second harness.
+        var peerFolds = new Dictionary<string, Dictionary<int, List<FoldMetrics>>>();
+        foreach (var (label, _) in PeerScorers.All)
+            peerFolds[label] = EvmThresholds.TopK.ToDictionary(k => k, _ => new List<FoldMetrics>());
+
         // OOF artifacts + folds for origins [FirstOrigin .. LastLabeledPeriod].
         for (int o = origins.FirstOrigin; o <= origins.LastLabeledPeriod; o++)
         {
@@ -65,6 +71,12 @@ public sealed class RollingOriginEvaluator
 
                 foreach (var (label, score) in CpiNativeScorers.All)
                     cpiFolds[label][k].Add(Metrics.ForFold(o, CpiNativeScorers.Candidates(testFold, score), k));
+
+                // Scored with THIS origin's artifact — the challenger inherits the rule's
+                // train-only fit and adds only the predeclared peer term on top.
+                foreach (var (label, score) in PeerScorers.All)
+                    peerFolds[label][k].Add(
+                        Metrics.ForFold(o, PeerScorers.Candidates(testFold, score, artifact), k));
             }
         }
 
@@ -81,6 +93,13 @@ public sealed class RollingOriginEvaluator
                 new ScorerReport { ScorerLabel = $"cpi-native:{c.Label}", K = k, Folds = cpiFolds[c.Label][k] }))
             .ToList();
 
+        // Descriptive only — never written into `artifacts`, which is what WatchlistScoringService
+        // serves. A challenger has to beat the rule out-of-fold before it earns deployment.
+        var peerReports = PeerScorers.All
+            .SelectMany(c => EvmThresholds.TopK.Select(k =>
+                new ScorerReport { ScorerLabel = $"peer:{c.Label}", K = k, Folds = peerFolds[c.Label][k] }))
+            .ToList();
+
         var scoredOrigins = artifacts.Keys.Where(c => c <= origins.LastLabeledPeriod).ToList();
         var summary = new ValidationSummary
         {
@@ -93,6 +112,7 @@ public sealed class RollingOriginEvaluator
             TotalTransitions = allPairs.Count(p => p.Label),
             Rule = ruleReports,
             CpiNative = cpiReports,
+            Challenger = peerReports,
         };
 
         return new TrainedModel { Artifacts = artifacts, Summary = summary, Origins = origins };

@@ -506,3 +506,6 @@ tr.selected td { background: var(--accent-weak); box-shadow: inset 3px 0 0 var(-
 .file-pick input[type="file"] { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
 .file-pick input[type="file"]:disabled { cursor: not-allowed; }
 .model-loading p { margin: var(--sp-2) 0 0; }
+/* Validation panel: challenger deltas read green/red against the deployed rule. */
+.mini td.good, .mini th.good { color: var(--good); }
+.mini td.bad, .mini th.bad { color: var(--bad); }

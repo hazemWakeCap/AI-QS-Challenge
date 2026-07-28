@@ -17,6 +17,7 @@ export function ValidationPanel() {
   const at = (reports: ScorerReport[], k: number) => reports.find((r) => r.k === k);
   const rule5 = at(data.rule, 5);
   const rule10 = at(data.rule, 10);
+  const challengers = (data.challenger ?? []).filter((r) => r.k === 5);
   const bestCpi5 = data.cpiNative
     .filter((r) => r.k === 5)
     .reduce<ScorerReport | null>((b, r) => ((r.macroPrecision ?? 0) > (b?.macroPrecision ?? 0) ? r : b), null);
@@ -59,6 +60,95 @@ export function ValidationPanel() {
         </p>
       )}
 
+      {data.collinearity?.zoneIsProxyForDiscipline && (
+        <>
+          <h3>The question we could not ask</h3>
+          <p className="note-warn">
+            We set out to test whether <b>physical neighbourhood</b> predicts drift. On this project
+            it cannot be tested: {data.collinearity.singleDisciplineZones} of{" "}
+            {data.collinearity.zoneCount} zones hold a single discipline, and{" "}
+            <b>none of the {data.collinearity.disciplineCount} disciplines spans more than one zone</b>.
+            A zone-neighbour feature therefore measures <b>trade</b>, not space — so we tested the two
+            separately.
+          </p>
+        </>
+      )}
+
+      {challengers.length > 0 && rule5 && (
+        <>
+          <h3>Do a centre&apos;s peers predict its drift? (precision@5)</h3>
+          <table className="mini">
+            <tbody>
+              <tr className="hi">
+                <td>Rule (deployed)</td>
+                <td className="num">{pct(rule5.macroPrecision)}</td>
+                <td className="num muted">—</td>
+              </tr>
+              {challengers.map((r) => {
+                const delta = (r.macroPrecision ?? 0) - (rule5.macroPrecision ?? 0);
+                return (
+                  <tr key={r.scorerLabel}>
+                    <td>{PEER_LABELS[r.scorerLabel] ?? r.scorerLabel}</td>
+                    <td className="num">{pct(r.macroPrecision)}</td>
+                    <td className={`num ${delta > 0 ? "good" : delta < 0 ? "bad" : "muted"}`}>
+                      {delta === 0 ? "—" : `${delta > 0 ? "+" : ""}${(delta * 100).toFixed(1)}pp`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className="muted small">
+            Peer CPI is the leave-one-out ΣEV/ΣAC of a centre&apos;s neighbours, blended at a{" "}
+            <b>predeclared</b> weight — not one fitted on these folds, which would let a challenger win
+            by construction. Both run on the same {data.foldCount} folds and rank the same centres.
+            {data.decisionsPerScorer ? (
+              <>
+                {" "}
+                Each figure rests on {data.decisionsPerScorer} ranked slots, so read the per-fold spread
+                below rather than the mean alone.
+              </>
+            ) : null}
+          </p>
+          <p className="muted small">
+            Descriptive only — <b>{data.scorerVersion} remains deployed</b>. A challenger is a candidate,
+            not a promotion.
+          </p>
+
+          <table className="mini">
+            <thead>
+              <tr>
+                <th>Fold</th>
+                <th className="num">Rule</th>
+                {challengers.map((r) => (
+                  <th key={r.scorerLabel} className="num">
+                    {PEER_SHORT[r.scorerLabel] ?? r.scorerLabel}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rule5.folds.map((f, i) => (
+                <tr key={f.periodId}>
+                  <td>P{f.periodId}</td>
+                  <td className="num">{pct(f.precision)}</td>
+                  {challengers.map((r) => {
+                    const cf = r.folds[i];
+                    const better = (cf?.precision ?? 0) > (f.precision ?? 0);
+                    const worse = (cf?.precision ?? 0) < (f.precision ?? 0);
+                    return (
+                      <td key={r.scorerLabel} className={`num ${better ? "good" : worse ? "bad" : ""}`}>
+                        {pct(cf?.precision ?? null)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
       <p className="muted small">{data.provenance}</p>
       <p className="muted small">
         {data.scorerVersion} · {data.featureSchemaVersion} · origins {data.evaluationOriginMin}–
@@ -67,6 +157,16 @@ export function ValidationPanel() {
     </aside>
   );
 }
+
+/** Named for what each challenger actually measures, never for what we hoped it measured. */
+const PEER_LABELS: Record<string, string> = {
+  "peer:peer-trade": "Peers · same trade",
+  "peer:peer-spatial": "Peers · same place, different trade",
+};
+const PEER_SHORT: Record<string, string> = {
+  "peer:peer-trade": "Trade",
+  "peer:peer-spatial": "Spatial",
+};
 
 function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
