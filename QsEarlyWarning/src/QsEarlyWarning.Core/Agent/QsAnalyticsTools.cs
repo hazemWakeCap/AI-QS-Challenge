@@ -589,6 +589,82 @@ public sealed class QsAnalyticsTools
         };
     }
 
+    /// <summary>
+    /// Share of a zone's BAC that must have been spent before its CPI is worth quoting. Mirrors
+    /// ModelController's floor exactly — if the assistant and the 3D view disagreed about which
+    /// zones are judgeable, one of them would be lying to the same QS.
+    /// </summary>
+    private const double ZoneMaterialityFloor = 0.01;
+
+    [Description("Locate cost risk PHYSICALLY: rank the building's zones (STRUCTURE, FLOORS-ALL, " +
+                 "BASEMENT, …) by how much budget is still unspent in zones that are drifting. " +
+                 "Use for 'where are we losing money', 'which part of the building is in trouble', " +
+                 "or any question about WHERE rather than which cost centre.")]
+    public object LocateCostRisk(
+        [Description("Reporting period, 4..12")] int periodId,
+        [Description("How many zones to return, 1..10")] int topK = 5)
+    {
+        if (!PresentPeriod(periodId)) return Err($"periodId must be {_snapshot.MinPeriod}..{_snapshot.ForecastPeriod}.");
+        topK = Math.Clamp(topK, 1, 10);
+
+        var rows = Panel.Where(p => p.PeriodId == periodId).ToList();
+        var located = rows.Where(p => !string.IsNullOrWhiteSpace(p.ZoneArea)).ToList();
+        if (located.Count == 0)
+            return Err("This project's data carries no Zone_Area, so cost cannot be located in the building.");
+
+        var zones = located
+            .GroupBy(p => p.ZoneArea!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                double bac = g.Sum(p => p.BacAed ?? 0);
+                double ev = g.Sum(p => p.EvAed ?? 0);
+                double ac = g.Sum(p => p.AcCumulative ?? 0);
+
+                // Aggregate CPI, never a mean of per-centre ratios.
+                bool sufficient = ac > 0 && bac > 0 && ac / bac >= ZoneMaterialityFloor;
+                double? cpi = sufficient ? ev / ac : null;
+
+                var worst = g.Where(p => p.Cpi is double c && double.IsFinite(c) && (p.AcCumulative ?? 0) > 0)
+                             .OrderBy(p => p.Cpi!.Value).FirstOrDefault();
+
+                return new
+                {
+                    zone = g.Key,
+                    bac = Round(bac),
+                    ac = Round(ac),
+                    unspent = Round(bac - ac),
+                    cpi = Round(cpi),
+                    judgeable = sufficient,
+                    drifting = sufficient && cpi < EvmThresholds.CpiThreshold,
+                    centreCount = g.Count(),
+                    amberCount = g.Count(p => string.Equals(p.AlertLevel, "AMBER", StringComparison.OrdinalIgnoreCase)),
+                    worstCentre = worst?.BccId,
+                    worstCentreCpi = Round(worst?.Cpi),
+                };
+            })
+            .OrderByDescending(z => z.drifting)          // drifting zones first…
+            .ThenByDescending(z => z.unspent)            // …then by money still at stake
+            .Take(topK)
+            .ToList();
+
+        double unspentInDrifting = zones.Where(z => z.drifting).Sum(z => z.unspent);
+
+        return new
+        {
+            periodId,
+            zones,
+            unspentInDriftingZones = Round(unspentInDrifting),
+            // Volunteered so the model cannot present a zone rollup as the whole truth: a zone can
+            // sit above 0.95 while the centres inside it are AMBER.
+            note = "A zone's CPI is the aggregate of its centres; a zone can read healthy while "
+                 + "individual centres inside it are AMBER — check amberCount, not just cpi. Zones "
+                 + "below the materiality floor report judgeable=false and no CPI.",
+            sources = Src("9_HISTORICAL_DATA grouped by Zone_Area", periodId,
+                $"period {periodId} · top {topK} zones", excluded: rows.Count - located.Count,
+                rowIds: zones.Select(z => $"ZONE:{z.zone}@P{periodId}")),
+        };
+    }
+
     // ── helpers ──
 
     private static CopilotSources Src(string sheet, int? period, string? filter, int? excluded, IEnumerable<string> rowIds) =>

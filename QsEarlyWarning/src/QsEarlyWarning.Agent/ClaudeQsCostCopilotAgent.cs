@@ -94,6 +94,7 @@ public sealed class ClaudeQsCostCopilotAgent : IQsCostCopilotAgent
             AIFunctionFactory.Create(tools.ProjectEvm),
             AIFunctionFactory.Create(tools.StressFlagsForPackage),
             AIFunctionFactory.Create(tools.ExplainVariance),
+            AIFunctionFactory.Create(tools.LocateCostRisk),
         };
 
         // Middleware: record each tool call (args + returned `sources` provenance) for the sanitized

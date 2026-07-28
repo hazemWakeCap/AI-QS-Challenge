@@ -79,6 +79,64 @@ public sealed class CopilotToolScopeTests
         Assert.Null(ErrorOf(result));
     }
 
+    // ── LocateCostRisk: the spatial tool ──
+
+    [Fact]
+    public void LocateCostRisk_rejects_out_of_range_period()
+    {
+        Assert.Contains("periodId", ErrorOf(Tools.LocateCostRisk(99, 5))!);
+    }
+
+    [Fact]
+    public void LocateCostRisk_clamps_topk_instead_of_throwing()
+    {
+        var result = Tools.LocateCostRisk(12, 999);
+        Assert.Null(ErrorOf(result));
+        Assert.True(Get<System.Collections.ICollection>(result, "zones")!.Count <= 10);
+    }
+
+    [Fact]
+    public void LocateCostRisk_puts_drifting_zones_first_and_names_the_worst_centre()
+    {
+        var result = Tools.LocateCostRisk(12, 5);
+        Assert.Null(ErrorOf(result));
+
+        var zones = Get<System.Collections.IEnumerable>(result, "zones")!.Cast<object>().ToList();
+        Assert.NotEmpty(zones);
+
+        // STRUCTURE is the drifting zone at period 12 (CPI 0.9396) and must lead.
+        Assert.Equal("STRUCTURE", Get<string>(zones[0], "zone"));
+        Assert.True(GetBool(zones[0], "drifting"));
+        Assert.False(string.IsNullOrWhiteSpace(Get<string>(zones[0], "worstCentre")));
+    }
+
+    [Fact]
+    public void LocateCostRisk_withholds_cpi_for_zones_too_early_to_judge()
+    {
+        // EXTERNAL is 0.68% spent at period 12: a ratio on that little money is not a verdict,
+        // and the assistant must not be handed one it could quote as fact.
+        var result = Tools.LocateCostRisk(12, 10);
+        var zones = Get<System.Collections.IEnumerable>(result, "zones")!.Cast<object>().ToList();
+
+        var external = zones.FirstOrDefault(z => Get<string>(z, "zone") == "EXTERNAL");
+        Assert.NotNull(external);
+        Assert.False(GetBool(external!, "judgeable"));
+        Assert.Null(Get<object>(external!, "cpi"));
+    }
+
+    [Fact]
+    public void LocateCostRisk_cites_its_sources()
+    {
+        var result = Tools.LocateCostRisk(12, 3);
+        Assert.NotNull(Get<object>(result, "sources"));
+    }
+
+    private static T? Get<T>(object o, string prop) where T : class
+        => o.GetType().GetProperty(prop)?.GetValue(o) as T;
+
+    private static bool GetBool(object o, string prop)
+        => (bool)(o.GetType().GetProperty(prop)?.GetValue(o) ?? false);
+
     private static string? ErrorOf(object result)
     {
         var prop = result.GetType().GetProperty("error");
