@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type CostCentreEvm, type CostMap, type GeometrySpec } from "../api/client";
 import { millions, money, ratio, DASH } from "../format";
 import { hex, legendFor, paintByCost, type PaintMode } from "../model/costPaint";
-import { generateTower, type GeneratedTower } from "../model/towerGenerator";
+import { generateTower, zoneAtPointer, type GeneratedTower } from "../model/towerGenerator";
 import { createViewer, fitToBounds, type Viewer } from "../model/viewer";
 import { Spinner } from "./Loading";
 
@@ -23,8 +23,12 @@ export function ModelView({
 }: {
   period: number;
   rev: number;
-  /** Hands the full row to the existing cost-centre drawer — same contract as CostCentreGrid. */
-  onSelectCentre?: (centre: CostCentreEvm) => void;
+  /**
+   * Hands the full row to the existing cost-centre drawer. The period travels with it: this tab
+   * can be scrubbed away from the app's selected period, and a drawer showing P12 numbers for a
+   * row the user clicked at P6 would be quietly wrong.
+   */
+  onSelectCentre?: (centre: CostCentreEvm, period: number) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<Viewer | null>(null);
@@ -39,6 +43,9 @@ export function ModelView({
   const [mode, setMode] = useState<PaintMode>("cpi");
   const [selected, setSelected] = useState<string | null>(null);
   const [showProvenance, setShowProvenance] = useState(false);
+  /** Period shown in this tab. Seeded from the app selector, then scrubbable in place. */
+  const [viewPeriod, setViewPeriod] = useState(period);
+  useEffect(() => setViewPeriod(period), [period]);
 
   // Latest paint inputs, readable from inside the geometry effect without making geometry depend
   // on them: a rebuild must paint itself immediately, or it renders in its base grey until the
@@ -50,7 +57,7 @@ export function ModelView({
   useEffect(() => {
     let off = false;
     setErr(null);
-    Promise.all([api.geometrySpec(), api.costMap(period), api.costCentres(period)])
+    Promise.all([api.geometrySpec(), api.costMap(viewPeriod), api.costCentres(viewPeriod)])
       .then(([g, m, c]) => {
         if (off) return;
         setSpec(g);
@@ -61,7 +68,7 @@ export function ModelView({
     return () => {
       off = true;
     };
-  }, [period, rev]);
+  }, [viewPeriod, rev]);
 
   // ── viewer + geometry lifecycle ──
   // One effect owns both, so there is never a window where a live tower points at a disposed
@@ -75,6 +82,8 @@ export function ModelView({
 
     let cancelled = false;
     let owned: Viewer | null = null;
+    let onPointerDown: ((e: PointerEvent) => void) | null = null;
+    let onPointerUp: ((e: PointerEvent) => void) | null = null;
 
     (async () => {
       try {
@@ -93,6 +102,25 @@ export function ModelView({
         if (m) paintByCost(viewer, tower, m.zones, md, sel);
 
         await fitToBounds(viewer, tower.bounds);
+
+        // Pick a zone by clicking the model. Guarded against drags: orbiting the camera ends in a
+        // mouseup on the canvas too, and treating that as a click would reselect on every rotate.
+        let down: { x: number; y: number } | null = null;
+        onPointerDown = (e: PointerEvent) => { down = { x: e.clientX, y: e.clientY }; };
+        onPointerUp = (e: PointerEvent) => {
+          if (!down) return;
+          const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+          down = null;
+          if (moved > 4) return;                       // a drag, not a click
+          const canvas = host.querySelector("canvas");
+          const current = towerRef.current;
+          if (!canvas || !current || !viewerRef.current) return;
+          const zone = zoneAtPointer(current, viewerRef.current, e, canvas);
+          setSelected((prev) => (zone && zone === prev ? null : zone));
+        };
+        host.addEventListener("pointerdown", onPointerDown);
+        host.addEventListener("pointerup", onPointerUp);
+
         if (!cancelled) setReady(true);
       } catch (e) {
         if (!cancelled) setErr(`3D viewer failed to start: ${String((e as Error).message ?? e)}`);
@@ -102,6 +130,8 @@ export function ModelView({
     return () => {
       cancelled = true;
       setReady(false);
+      if (onPointerDown) host.removeEventListener("pointerdown", onPointerDown);
+      if (onPointerUp) host.removeEventListener("pointerup", onPointerUp);
       towerRef.current?.dispose();
       towerRef.current = null;
       viewerRef.current = null;
@@ -137,6 +167,19 @@ export function ModelView({
           <span className="muted small">
             Period {map.period} · {map.zones.length} zones · {map.currency}
           </span>
+          <div className="scrub">
+            <label htmlFor="xray-period" className="muted small">Period</label>
+            <input
+              id="xray-period"
+              type="range"
+              min={map.minPeriod}
+              max={map.maxPeriod}
+              value={viewPeriod}
+              onChange={(e) => setViewPeriod(Number(e.target.value))}
+              aria-label={`Reporting period ${viewPeriod}`}
+            />
+            <span className="mono small">{viewPeriod}</span>
+          </div>
           <div className="seg">
             <button
               className={`btn sm ${mode === "cpi" ? "primary" : "ghost"}`}
@@ -327,7 +370,7 @@ export function ModelView({
                 disabled={!centres.some((c) => c.bccId === sel.topRiskBccId)}
                 onClick={() => {
                   const row = centres.find((c) => c.bccId === sel.topRiskBccId);
-                  if (row) onSelectCentre?.(row);
+                  if (row) onSelectCentre?.(row, viewPeriod);
                 }}
               >
                 Open worst centre: {sel.topRiskBccId}

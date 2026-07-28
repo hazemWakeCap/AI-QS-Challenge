@@ -509,3 +509,6 @@ tr.selected td { background: var(--accent-weak); box-shadow: inset 3px 0 0 var(-
 /* Validation panel: challenger deltas read green/red against the deployed rule. */
 .mini td.good, .mini th.good { color: var(--good); }
 .mini td.bad, .mini th.bad { color: var(--bad); }
+/* Period scrubber inside the 3D tab — the demo shouldn't have to reach for the global selector. */
+.scrub { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.scrub input[type="range"] { width: 130px; accent-color: var(--accent); cursor: pointer; }

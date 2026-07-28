@@ -36,6 +36,12 @@ const STANDARD_KEYS = ["netvolume", "grossvolume", "netarea", "grossarea", "nets
 
 export interface ClassMeasurement {
   ifcClass: string;
+  /**
+   * Element counts per building storey, "(none)" for elements in no storey. Carried per class so a
+   * downstream rule can place a slab by the level it sits on — testing the storey against the whole
+   * class instead would send every slab wherever the first matching level pointed.
+   */
+  byStorey: Record<string, number>;
   /** Elements of this class in the model. */
   elementCount: number;
   /** Elements that yielded a volume. */
@@ -77,6 +83,8 @@ export async function measureModel(model: FRAGS.FragmentsModel): Promise<ModelMe
     MEASURED_CLASSES.map((c) => new RegExp(`^${c}$`, "i")),
   );
 
+  const storeyOf = await storeyIndex(model);
+
   const byClass: ClassMeasurement[] = [];
   const keysSeen = new Set<string>();
   const measuredIds = new Set<number>();
@@ -92,9 +100,13 @@ export async function measureModel(model: FRAGS.FragmentsModel): Promise<ModelMe
     for (const id of localIds) measuredIds.add(id);
 
     const measurement: ClassMeasurement = {
-      ifcClass, elementCount: localIds.length,
+      ifcClass, elementCount: localIds.length, byStorey: {},
       volumeCount: 0, volume: 0, areaCount: 0, area: 0,
     };
+    for (const id of localIds) {
+      const storey = storeyOf.get(id) ?? "(none)";
+      measurement.byStorey[storey] = (measurement.byStorey[storey] ?? 0) + 1;
+    }
 
     // Pull the property sets in one call per class rather than per element.
     const data = await model.getItemsData(localIds, {
@@ -129,7 +141,7 @@ export async function measureModel(model: FRAGS.FragmentsModel): Promise<ModelMe
 
   byClass.sort((a, b) => b.elementCount - a.elementCount);
 
-  const unplacedElements = await countUnplaced(model, measuredIds);
+  const unplacedElements = [...measuredIds].filter((id) => !storeyOf.has(id)).length;
 
   const quantityKeys = [...keysSeen]
     .filter((k) => matches(k, VOLUME_KEYS) || matches(k, AREA_KEYS))
@@ -150,37 +162,33 @@ export async function measureModel(model: FRAGS.FragmentsModel): Promise<ModelMe
 }
 
 /**
- * Elements that belong to no building storey. They exist and cost money, but a QS cannot say where
- * they are — on the sample model 47 beams and 22 members are unplaced.
+ * localId → storey name, from IfcRelContainedInSpatialStructure.
+ *
+ * Elements missing from this map belong to no storey at all — 69 of the sample model's do, which is
+ * itself worth reporting: they exist and cost money, but a QS cannot say where they are.
  */
-async function countUnplaced(
-  model: FRAGS.FragmentsModel,
-  measuredIds: Set<number>,
-): Promise<number> {
+async function storeyIndex(model: FRAGS.FragmentsModel): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
   try {
-    const storeys = await model.getItemsOfCategories([/^IFCBUILDINGSTOREY$/i]);
-    const storeyIds = Object.values(storeys).flat();
-    if (storeyIds.length === 0) return 0;
+    const byCategory = await model.getItemsOfCategories([/^IFCBUILDINGSTOREY$/i]);
+    const storeyIds = Object.values(byCategory).flat();
+    if (storeyIds.length === 0) return out;
 
     const data = await model.getItemsData(storeyIds, {
-      attributesDefault: false,
       relations: { ContainsElements: { attributes: false, relations: true } },
     });
-
-    const placed = new Set<number>();
     for (const storey of data) {
+      const name = storey.Name && "value" in storey.Name ? String(storey.Name.value) : "(unnamed)";
       const contained = (storey.ContainsElements as FRAGS.ItemData[] | undefined) ?? [];
       for (const item of contained) {
         const id = (item as { _localId?: { value?: number } })._localId?.value;
-        // Only count against the population we actually measured — storeys also contain element
-        // classes this take-off ignores, and subtracting those would invent unplaced elements.
-        if (typeof id === "number" && measuredIds.has(id)) placed.add(id);
+        if (typeof id === "number") out.set(id, name);
       }
     }
-    return placed.size === 0 ? 0 : Math.max(0, measuredIds.size - placed.size);
   } catch {
-    return 0;
+    /* storey containment unavailable; every element reports as unplaced */
   }
+  return out;
 }
 
 /** Building storey names, in model order. */

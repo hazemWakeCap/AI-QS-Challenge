@@ -52,6 +52,9 @@ export default function App() {
   const [err, setErr] = useState<string | null>(null);
   const [varianceBcc, setVarianceBcc] = useState<string | null>(null);
   const [selectedCentre, setSelectedCentre] = useState<CostCentreEvm | null>(null);
+  // The period the drawer should read. Normally the selected period, but the 3D tab can be scrubbed
+  // independently and hands its own period over with the row.
+  const [drawerPeriod, setDrawerPeriod] = useState<number | null>(null);
 
   const project = projects.find((p) => p.slug === slug) ?? null;
   // A project with no published estimate has no EVM data yet — its read endpoints would error, so we
@@ -93,7 +96,7 @@ export default function App() {
 
   // A cost-centre row carries period-specific EVM, so a lingering selection would misrender after the
   // project or period changes — close the drawer on either switch.
-  useEffect(() => { setSelectedCentre(null); }, [slug, period]);
+  useEffect(() => { setSelectedCentre(null); setDrawerPeriod(null); }, [slug, period]);
 
   const periods = Array.from({ length: range.forecast - range.min + 1 }, (_, i) => range.min + i);
   const refresh = () => setRev((r) => r + 1);
@@ -147,12 +150,13 @@ export default function App() {
             {tab === "centres" && (
               <section className="card">
                 <CostCentreGrid period={period} rev={rev} currency={cur}
-                                onSelect={setSelectedCentre} selectedBcc={selectedCentre?.bccId ?? null} />
+                                onSelect={(c) => { setSelectedCentre(c); setDrawerPeriod(period); }} selectedBcc={selectedCentre?.bccId ?? null} />
               </section>
             )}
             {tab === "model" && (
               <Suspense fallback={<section className="card"><Spinner /></section>}>
-                <ModelView period={period} rev={rev} onSelectCentre={setSelectedCentre} />
+                <ModelView period={period} rev={rev}
+                           onSelectCentre={(c, p) => { setSelectedCentre(c); setDrawerPeriod(p); }} />
               </Suspense>
             )}
             {tab === "ifc" && (
@@ -162,9 +166,9 @@ export default function App() {
             )}
             {/* Shared cost-centre inspector: opened from the grid AND from a zone in the 3D view,
                 so the model is a new way into the existing product rather than a parallel one. */}
-            <Drawer open={!!selectedCentre} onClose={() => setSelectedCentre(null)}
+            <Drawer open={!!selectedCentre} onClose={() => { setSelectedCentre(null); setDrawerPeriod(null); }}
                     title={<span className="mono">Cost Centre · {selectedCentre?.bccId}</span>}>
-              {selectedCentre && <CostCentreDetail centre={selectedCentre} period={period} currency={cur} />}
+              {selectedCentre && <CostCentreDetail centre={selectedCentre} period={drawerPeriod ?? period} currency={cur} />}
             </Drawer>
             {tab === "capture" && <section className="card narrow"><CapturePanel period={period} rev={rev} onChanged={refresh} /></section>}
             {tab === "workflow" && <section className="card narrow"><PeriodsPanel rev={rev} onChanged={refresh} activeVersionId={project?.activeEstimateVersionId ?? null} /></section>}

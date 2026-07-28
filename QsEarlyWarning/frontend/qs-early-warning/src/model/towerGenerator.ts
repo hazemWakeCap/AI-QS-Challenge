@@ -25,6 +25,44 @@ import type { Viewer } from "./viewer";
  * (Antonio question: can procedurally created elements be indexed so per-item colour works?)
  */
 
+/**
+ * Resolves a click on the canvas to the zone under the pointer, or null when the click misses the
+ * building. Raycasting the group directly (rather than the whole scene) keeps helper objects and
+ * the ground plane's own children out of the result.
+ */
+export function zoneAtPointer(
+  tower: GeneratedTower,
+  viewer: Viewer,
+  event: { clientX: number; clientY: number },
+  canvas: HTMLCanvasElement,
+): string | null {
+  const rect = canvas.getBoundingClientRect();
+  const pointer = new THREE.Vector2(
+    ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    -((event.clientY - rect.top) / rect.height) * 2 + 1,
+  );
+
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(pointer, viewer.world.camera.three);
+
+  // Sorted near→far by three.js. The translucent facade is skipped so clicking "through" the skin
+  // selects the slab or column you can actually see behind it — otherwise the envelope would
+  // swallow almost every click on the building.
+  for (const hit of raycaster.intersectObjects(tower.group.children, false)) {
+    const zone = (hit.object as THREE.Mesh).userData?.zoneCode as string | undefined;
+    if (!zone) continue;
+    if (TRANSLUCENT_ZONES.has(zone)) continue;
+    return zone;
+  }
+
+  // Nothing solid hit: fall back to the facade if that is genuinely what was clicked.
+  for (const hit of raycaster.intersectObjects(tower.group.children, false)) {
+    const zone = (hit.object as THREE.Mesh).userData?.zoneCode as string | undefined;
+    if (zone) return zone;
+  }
+  return null;
+}
+
 export interface GeneratedTower {
   /** Scene graph holding every zone mesh. */
   group: THREE.Group;

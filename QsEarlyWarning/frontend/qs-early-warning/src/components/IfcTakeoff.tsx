@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type TakeoffLineRequest, type TakeoffPricing } from "../api/client";
+import { api, type CostMap, type TakeoffLineRequest, type TakeoffPricing } from "../api/client";
 import { money, millions, DASH } from "../format";
 import { fetchBundledIfc, loadIfc, readIfcFile } from "../model/ifcLoader";
 import { measureModel, type ModelMeasurement } from "../model/ifcMeasure";
+import { mapToZones, type ZoneMapResult } from "../model/ifcZoneMap";
 import { createViewer, fitToBounds, type Viewer } from "../model/viewer";
 import { Spinner } from "./Loading";
 import * as THREE from "three";
@@ -27,6 +28,10 @@ export function IfcTakeoff() {
   const [fileName, setFileName] = useState<string>("school_str.ifc");
   const [measurement, setMeasurement] = useState<ModelMeasurement | null>(null);
   const [pricing, setPricing] = useState<TakeoffPricing | null>(null);
+  const [zoneMap, setZoneMap] = useState<ZoneMapResult | null>(null);
+  // Tower X's cost map, used only to report which of ITS zones this model reaches — never to
+  // suggest the loaded building shares that budget.
+  const [costMap, setCostMap] = useState<CostMap | null>(null);
   const [showRules, setShowRules] = useState(false);
 
   /** Load → measure → price. One path, whether the bytes came from the bundle or a file picker. */
@@ -38,6 +43,7 @@ export function IfcTakeoff() {
     setErr(null);
     setMeasurement(null);
     setPricing(null);
+    setZoneMap(null);
     setFileName(name);
 
     try {
@@ -78,6 +84,15 @@ export function IfcTakeoff() {
       }
 
       setPricing(await api.priceTakeoff(lines, measured.report.totalElements));
+
+      // Classify against Tower X's zones and report how much of the model a rule set can place.
+      // Fetched per ingest rather than cached in state: `ingest` is a dependency of the viewer
+      // effect, so making it depend on cost-map state would tear the viewer down and re-load the
+      // 8 MB IFC every time the map arrived.
+      const cm = await api.costMap().catch(() => null);
+      setCostMap(cm);
+      setZoneMap(mapToZones(measured.byClass, measured.report.storeys, (cm?.zones ?? []).map((z) => z.zoneCode)));
+
       setStatus("");
     } catch (e) {
       setErr(String((e as Error).message ?? e));
@@ -347,6 +362,68 @@ export function IfcTakeoff() {
             </table>
             {report.storeys.length > 0 && (
               <p className="muted small">{report.storeys.join(" · ")}</p>
+            )}
+          </div>
+        )}
+
+        {zoneMap && (
+          <div className="card">
+            <h3>Could this model be located in the cost plan?</h3>
+            <div className="kpis kpis-2">
+              <div className="kpi">
+                <div className="kpi-v">{(zoneMap.matchRate * 100).toFixed(0)}%</div>
+                <div className="kpi-l">elements placed</div>
+                <div className="kpi-sub">
+                  {zoneMap.matchedElements} of {zoneMap.totalElements} by class + storey
+                </div>
+              </div>
+              <div className="kpi">
+                <div className="kpi-v">{zoneMap.matched.length}</div>
+                <div className="kpi-l">zones reached</div>
+                <div className="kpi-sub">of {costMap?.zones.length ?? 0} in the cost plan</div>
+              </div>
+            </div>
+
+            <p className="note-warn">
+              This shows the <b>mechanism</b>, not a budget. The loaded model is a school and the zones
+              belong to Tower X — a matched element means &ldquo;an element of this kind would map
+              here&rdquo;, never that it shares that budget.
+            </p>
+
+            <div className="grid-scroll">
+              <table className="grid">
+                <thead>
+                  <tr>
+                    <th>Zone</th>
+                    <th className="num">Elements</th>
+                    <th>From</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {zoneMap.matched.map((m) => (
+                    <tr key={m.zoneCode}>
+                      <td className="mono">{m.zoneCode}</td>
+                      <td className="num">{m.elementCount}</td>
+                      <td className="muted small mono">{m.ifcClasses.join(", ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {zoneMap.unmatched.length > 0 && (
+              <p className="muted small">
+                No rule placed{" "}
+                {zoneMap.unmatched.map((u) => `${u.ifcClass} (${u.elementCount})`).join(", ")}.
+              </p>
+            )}
+
+            {zoneMap.zonesWithNoGeometry.length > 0 && (
+              <p className="muted small">
+                <b>{zoneMap.zonesWithNoGeometry.length} of Tower X&apos;s zones got nothing from this
+                model</b> — {zoneMap.zonesWithNoGeometry.join(", ")}. A structural model carries no MEP,
+                finishes or landscaping, and a match rate that ignored that would flatter itself.
+              </p>
             )}
           </div>
         )}
