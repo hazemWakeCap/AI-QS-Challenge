@@ -163,7 +163,7 @@
 
 <div class="progress" id="bar"></div>
 <div class="brandmark">QS Cost · System of Record</div>
-<div class="counter" id="count">1 / 17</div>
+<div class="counter" id="count">1 / 18</div>
 <div class="arrows"><button id="prev">‹</button><button id="next">›</button></div>
 
 <div class="deck" id="deck">
@@ -569,7 +569,66 @@
     </div>
   </section>
 
-  <!-- 15 — ARCHITECTURE -->
+  <!-- 15 — DID THE BUILDING TELL US ANYTHING? -->
+  <section class="slide">
+    <div class="wrap">
+      <div class="kicker">The experiment we nearly got wrong</div>
+      <h2>We asked <span class="grad">the wrong question</span> — and found out in time.</h2>
+
+      <div class="two" style="margin-top:20px">
+        <div>
+          <p class="lead" style="margin-bottom:14px;max-width:46ch">
+            We set out to test: <b>does physical neighbourhood predict cost drift?</b> First we checked
+            whether the data could answer it.
+          </p>
+          <div class="card" style="padding:20px 22px;border-color:var(--amber)">
+            <div class="sub" style="text-transform:uppercase;letter-spacing:.1em;font-weight:700;color:var(--amber);margin-bottom:12px">It could not</div>
+            <div style="display:flex;gap:28px;flex-wrap:wrap">
+              <div><div style="font-family:var(--mono);font-size:26px;color:var(--ink);font-weight:700">8 / 10</div><div class="sub" style="font-size:12.5px">zones hold a single trade</div></div>
+              <div><div style="font-family:var(--mono);font-size:26px;color:var(--red);font-weight:700">0 / 18</div><div class="sub" style="font-size:12.5px">trades span more than one zone</div></div>
+            </div>
+            <p class="sub" style="margin-top:14px;font-size:13.5px">
+              <span style="font-family:var(--mono);color:var(--blue2)">Zone_Area</span> is a coarsening of
+              <span style="font-family:var(--mono);color:var(--blue2)">Discipline</span>. A "zone-neighbour"
+              feature measures <b>trade</b>, not space.
+            </p>
+          </div>
+          <ul class="bul" style="margin-top:16px">
+            <li>So we ran <b>both</b> questions, each labelled for what it really measures — with the peer
+              weight <b>predeclared, not fitted</b>. A weight tuned on the folds that report the result
+              wins by construction.</li>
+          </ul>
+        </div>
+
+        <div class="card" style="padding:22px 24px">
+          <div class="sub" style="text-transform:uppercase;letter-spacing:.1em;font-weight:700;color:var(--ink3);margin-bottom:14px">precision@5 · 8 rolling-origin folds</div>
+          <table class="mock">
+            <thead><tr><th>Ranker</th><th style="text-align:right">P@5</th><th style="text-align:right">vs rule</th></tr></thead>
+            <tbody>
+              <tr><td>Rule <span class="sub">(deployed)</span></td><td class="cpi">45.0%</td><td class="sub" style="text-align:right">—</td></tr>
+              <tr><td>Best CPI-native baseline</td><td class="cpi">35.0%</td><td class="score" style="color:var(--red)">−10.0</td></tr>
+              <tr><td><b>Peers · same trade</b></td><td class="cpi" style="color:var(--green)"><b>57.5%</b></td><td class="score" style="color:var(--green)">+12.5</td></tr>
+              <tr><td>Peers · same place, <b>different</b> trade</td><td class="cpi">42.5%</td><td class="score" style="color:var(--red)">−2.5</td></tr>
+            </tbody>
+          </table>
+          <div class="sub" style="margin-top:14px;line-height:1.55">
+            <b style="color:var(--ink)">Trade peers predict drift. Space does not.</b><br>
+            The genuinely spatial variant is <b>identical to the rule on 7 of 8 folds</b> — it changes
+            almost nothing.
+          </div>
+        </div>
+      </div>
+
+      <p class="foot-note" style="margin-top:14px;max-width:104ch">
+        <span class="pill amber" style="margin-right:8px">a candidate, not a promotion</span>
+        Without that check we would have published <b>+12.5pp with the wrong explanation attached</b>. The
+        headline rests on 40 ranked slots, so <span style="font-family:var(--mono);color:var(--blue2)">RuleRiskScore@v1</span>
+        stays deployed.
+      </p>
+    </div>
+  </section>
+
+  <!-- 16 — ARCHITECTURE -->
   <section class="slide">
     <div class="wrap">
       <div class="kicker">Under the Hood</div>
@@ -587,7 +646,7 @@
     </div>
   </section>
 
-  <!-- 16 — WHY CREDIBLE -->
+  <!-- 17 — WHY CREDIBLE -->
   <section class="slide">
     <div class="wrap">
       <div class="kicker">Why It's Credible</div>
@@ -601,7 +660,7 @@
     </div>
   </section>
 
-  <!-- 17 — CLOSE -->
+  <!-- 18 — CLOSE -->
   <section class="slide">
     <div class="wrap" style="text-align:center">
       <div class="kicker" style="justify-content:center">Thank You</div>
