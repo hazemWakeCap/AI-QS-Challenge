@@ -512,3 +512,36 @@ tr.selected td { background: var(--accent-weak); box-shadow: inset 3px 0 0 var(-
 /* Period scrubber inside the 3D tab — the demo shouldn't have to reach for the global selector. */
 .scrub { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .scrub input[type="range"] { width: 130px; accent-color: var(--accent); cursor: pointer; }
+
+/* ── Render harness (/?render=1) ──
+   The stage a video is captured from. Fixed pixel size on purpose: the exporter sets the window to
+   match, so frames need no scaling or cropping afterwards and text stays crisp at 1:1. */
+.render-stage {
+  position: relative; overflow: hidden;
+  background: linear-gradient(160deg, #f7f9fc 0%, #eef2f8 100%);
+  font-family: var(--font-sans);
+}
+.render-canvas { position: absolute; inset: 0; }
+.render-canvas canvas { width: 100% !important; height: 100% !important; }
+
+/* Sits above the canvas and is captured with it — the overlay is part of the frame, not UI. */
+.render-overlay { position: absolute; inset: 0; pointer-events: none; padding: 40px 48px;
+  display: flex; flex-direction: column; }
+.render-title { font-family: var(--font-display); font-size: 30px; font-weight: 600; color: var(--ink); }
+.render-sub { font-size: 15px; color: var(--ink-soft); margin-top: 6px; max-width: 780px; }
+
+.render-stats { position: absolute; top: 40px; right: 48px; text-align: right; }
+.render-period { font-family: var(--font-display); font-size: 44px; font-weight: 600;
+  color: var(--ink); line-height: 1; }
+.render-count { font-size: 15px; color: var(--ink-soft); margin-top: 8px; }
+.render-gap { font-size: 13px; color: var(--ink-faint); margin-top: 4px; }
+
+.render-legend { position: absolute; left: 200px; bottom: 112px;
+  display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--ink-soft); }
+
+.render-caption { position: absolute; left: 200px; right: 48px; bottom: 44px;
+  font-size: 13px; line-height: 1.5; color: var(--ink-soft);
+  border-left: 3px solid var(--warn); padding-left: 14px; max-width: 900px; }
+
+.render-error { position: absolute; inset: 0; display: grid; place-items: center;
+  color: var(--bad); font-size: 16px; padding: 40px; text-align: center; }

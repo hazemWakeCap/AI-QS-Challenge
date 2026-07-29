@@ -17,7 +17,7 @@ import { mapToZones, type ZoneMapResult } from "../model/ifcZoneMap";
 import { createViewer, fitToBounds, type Viewer } from "../model/viewer";
 import { Spinner } from "./Loading";
 import * as THREE from "three";
-import type * as FRAGS from "@thatopen/fragments";
+import * as FRAGS from "@thatopen/fragments";
 
 /**
  * IFC Take-off — measure a real model, price it with this project's rate library, and show where
@@ -76,6 +76,8 @@ export function IfcTakeoff({
   const [builtCount, setBuiltCount] = useState(0);
   /** Last drawn frame, so each tick only applies what actually changed. */
   const prevFrameRef = useRef<SequenceFrame | null>(null);
+  /** Serialises frame paints — see the draw effect for why this cannot be fire-and-forget. */
+  const paintChainRef = useRef<Promise<void>>(Promise.resolve());
   // Tower X's cost map, used only to report which of ITS zones this model reaches — never to
   // suggest the loaded building shares that budget.
   const [costMap, setCostMap] = useState<CostMap | null>(null);
@@ -313,8 +315,18 @@ export function IfcTakeoff({
 
     const frame = frameAt(playT, sequence, centresByPeriod);
     setBuiltCount(frame.builtCount);
-    void paintSequenceFrame(viewer, model, index, frame, prevFrameRef.current);
-    prevFrameRef.current = frame;
+
+    // Serialised on purpose. An earlier version fired the paint and advanced `prevFrameRef`
+    // immediately, so if a paint was still in flight the next frame's delta was computed against a
+    // frame that had never landed — and the elements in between were dropped silently. Frames are
+    // now chained, and a frame that arrives while one is painting supersedes rather than races.
+    paintChainRef.current = paintChainRef.current
+      .then(async () => {
+        const previous = prevFrameRef.current;
+        await paintSequenceFrame(viewer, model, index, frame, previous);
+        prevFrameRef.current = frame;
+      })
+      .catch(() => { /* a dropped frame must not poison the chain */ });
   }, [playT, sequence, centresByPeriod, index]);
 
   // ── locate in the cost plan, then paint ──
@@ -448,6 +460,10 @@ export function IfcTakeoff({
                 onClick={() => {
                   if (playT === null) {
                     prevFrameRef.current = null; // first frame hides everything, then builds up
+                    // Full geometry for everything visible: with the default LOD mode the detail
+                    // level depends on camera distance, so elements get reprocessed as the view
+                    // shifts. Set once per run — it restarts the model sweep itself.
+                    void modelRef.current?.setLodMode(FRAGS.LodMode.ALL_GEOMETRY);
                     setPlayT(costMap.minPeriod);
                     setPlaying(true);
                   } else {

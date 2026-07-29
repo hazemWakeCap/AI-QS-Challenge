@@ -1,11 +1,11 @@
 import * as THREE from "three";
-import type * as FRAGS from "@thatopen/fragments";
+import * as FRAGS from "@thatopen/fragments";
 import type { CostCentreEvm, ZoneCost } from "../api/client";
 import { colorFor, colorForCentreAlert, type PaintMode } from "./costPaint";
 import { centresFor, worstAlert, type ElementMapIndex } from "./ifcElementMap";
 import type { SequenceFrame } from "./ifcSequence";
 import type { ZoneMapResult } from "./ifcZoneMap";
-import type { Viewer } from "./viewer";
+import { settle, type Viewer } from "./viewer";
 
 /**
  * Paints zone cost onto a real IFC.
@@ -104,8 +104,8 @@ export async function paintIfcByCost(
     model.setOpacity(ghosts, UNPLACED_OPACITY);
   }
 
-  // The world renders on demand, so a colour change is invisible until the renderer is asked to
-  // draw again — the same reason the massing tab sets needsUpdate after a repaint.
+  // The renderer draws every frame on its own; what is stale after a mutation is the model data on
+  // the worker, which is what this waits for.
   await viewer.fragments.core.update(true);
   return painted;
 }
@@ -199,10 +199,22 @@ export async function paintSequenceFrame(
   index: ElementMapIndex,
   frame: SequenceFrame,
   previous: SequenceFrame | null,
+  /**
+   * Wait until the model has genuinely finished redrawing before resolving.
+   *
+   * The exporter needs this — a captured frame must be the frame it asked for. Interactive playback
+   * does not: settling costs a full model sweep, and a viewer that is a beat behind is a far better
+   * experience than one that advances once a second.
+   */
+  waitForSettle = false,
 ): Promise<void> {
-  // Only the difference is applied. Re-sending all ~1,100 elements every tick and forcing a full
-  // refresh saturates the main thread badly enough to freeze the renderer, and almost nothing
-  // changes between two frames a quarter of a period apart.
+  // Only the difference is applied.
+  //
+  // This matters far more than it looks. Inside Fragments, every setVisible/setColor/setOpacity
+  // reaches `updateVirtualMeshes` -> `restart()`, which throws away the worker's progressive sweep
+  // over the WHOLE model and begins again. The cost of a mutation is therefore proportional to the
+  // model, not to how much changed — so the winning move is to issue as few calls as possible, not
+  // to touch as few elements as possible.
   const appear = new Map<number, number>();   // localId → colour
   const recolour = new Map<number, number>();
   const vanish: number[] = [];
@@ -220,42 +232,71 @@ export async function paintSequenceFrame(
     for (const localId of previous.built) {
       if (!frame.built.has(localId)) vanish.push(localId);
     }
-  } else {
-    // First frame of a run: everything priced starts hidden, then this frame's share appears.
-    const hidden = index.mappedLocalIds.filter((id) => !frame.built.has(id));
-    if (hidden.length > 0) model.setVisible(hidden, false);
+  }
 
-    // Never priced, so never built — held on screen throughout as the scope with no money behind it.
-    if (index.unmappedLocalIds.length > 0) {
-      model.setVisible(index.unmappedLocalIds, true);
-      model.setColor(index.unmappedLocalIds, new THREE.Color(UNPLACED));
-      model.setOpacity(index.unmappedLocalIds, UNPLACED_OPACITY);
+  const first = previous === null;
+  if (!first && appear.size === 0 && recolour.size === 0 && vanish.length === 0) return;
+
+  // Nothing below reaches the worker until `frozen` is cleared, so the whole frame lands as one
+  // batch rather than as a dozen separate whole-model restarts.
+  model.frozen = true;
+  try {
+    if (first) {
+      const hidden = index.mappedLocalIds.filter((id) => !frame.built.has(id));
+      if (hidden.length > 0) model.setVisible(hidden, false);
+
+      // Never priced, so never built — held on screen throughout as the scope with no money behind it.
+      if (index.unmappedLocalIds.length > 0) {
+        model.setVisible(index.unmappedLocalIds, true);
+        model.highlight(index.unmappedLocalIds, ghostStyle());
+      }
     }
+
+    if (vanish.length > 0) model.setVisible(vanish, false);
+
+    // One `highlight` instead of a setColor + setOpacity pair: both are wrappers over the same
+    // worker call, so pairing them doubled the restarts for no gain.
+    for (const [color, ids] of groupByColor(appear)) {
+      model.setVisible(ids, true);
+      model.highlight(ids, builtStyle(color));
+    }
+    for (const [color, ids] of groupByColor(recolour)) {
+      model.highlight(ids, builtStyle(color));
+    }
+  } finally {
+    model.frozen = false;
   }
 
-  if (vanish.length > 0) model.setVisible(vanish, false);
-
-  const byColor = new Map<number, number[]>();
-  for (const [localId, color] of appear) (byColor.get(color) ?? byColor.set(color, []).get(color)!).push(localId);
-
-  for (const [color, ids] of byColor) {
-    model.setVisible(ids, true);
-    model.setColor(ids, new THREE.Color(color));
-    model.setOpacity(ids, 1);
-  }
-
-  const byRecolour = new Map<number, number[]>();
-  for (const [localId, color] of recolour)
-    (byRecolour.get(color) ?? byRecolour.set(color, []).get(color)!).push(localId);
-  for (const [color, ids] of byRecolour) model.setColor(ids, new THREE.Color(color));
-
-  if (appear.size === 0 && recolour.size === 0 && vanish.length === 0 && previous) return;
-
-  // `update(false)` rather than `update(true)`: a forced refresh re-evaluates the whole model and
-  // costs enough at this frame rate to stall the renderer, and the sequence only ever changes
-  // visibility and colour on geometry that is already resident.
-  await viewer.fragments.core.update(false);
+  // Measured on the bundled model: `update(false)` is a 3 ms median, so applying a frame is cheap.
+  // Settling is not — it waits for a whole-model sweep — which is exactly why it is opt-in.
+  if (waitForSettle) await settle(viewer, model);
+  else await viewer.fragments.core.update(false);
 }
+
+/** localId → colour, inverted into colour → localIds so each colour costs one call. */
+function groupByColor(byLocalId: Map<number, number>): Map<number, number[]> {
+  const out = new Map<number, number[]>();
+  for (const [localId, color] of byLocalId) {
+    const bucket = out.get(color);
+    if (bucket) bucket.push(localId);
+    else out.set(color, [localId]);
+  }
+  return out;
+}
+
+const builtStyle = (color: number): FRAGS.MaterialDefinition => ({
+  color: new THREE.Color(color),
+  renderedFaces: FRAGS.RenderedFaces.TWO,
+  opacity: 1,
+  transparent: false,
+});
+
+const ghostStyle = (): FRAGS.MaterialDefinition => ({
+  color: new THREE.Color(UNPLACED),
+  renderedFaces: FRAGS.RenderedFaces.TWO,
+  opacity: UNPLACED_OPACITY,
+  transparent: true,
+});
 
 /** Restores every element the sequence hid, so leaving playback does not leave a half-built model. */
 export async function showAllElements(

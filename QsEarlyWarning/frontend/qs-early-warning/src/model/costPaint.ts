@@ -141,7 +141,8 @@ export function paintByCost(
     }
   }
 
-  // The world renders on demand, so a colour change is invisible until the renderer is asked to
-  // draw again. Without this the model keeps whatever colours were on screen when it last drew.
+  // The renderer runs in AUTO mode, so it already draws every animation frame and `needsUpdate` is
+  // only honoured in MANUAL. This line is therefore a no-op today — kept because the render harness
+  // does switch to MANUAL, and there it is what makes the new colour appear.
   viewer.world.renderer!.needsUpdate = true;
 }

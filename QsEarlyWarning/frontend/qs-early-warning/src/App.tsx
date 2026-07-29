@@ -20,6 +20,10 @@ import { Drawer } from "./components/Drawer";
 // exactly where it was before this feature existed.
 const ModelView = lazy(() => import("./components/ModelView").then((m) => ({ default: m.ModelView })));
 const IfcTakeoff = lazy(() => import("./components/IfcTakeoff").then((m) => ({ default: m.IfcTakeoff })));
+// Reached only at /?render=1, by the video exporter. Lazy for the same reason as the tabs above:
+// nobody loading the product should pay for a surface only a renderer opens.
+const RenderHarness = lazy(() =>
+  import("./components/RenderHarness").then((m) => ({ default: m.RenderHarness })));
 import { ProjectsAdmin } from "./components/ProjectsAdmin";
 import { EmptyState, Spinner } from "./components/Loading";
 
@@ -41,7 +45,25 @@ const TABS: { id: Tab; label: string; featured?: boolean }[] = [
   { id: "projects", label: "Projects" },
 ];
 
+/** The exporter's entry point. A query flag rather than a route — there is no router here. */
+const IS_RENDER_MODE = new URLSearchParams(window.location.search).get("render") === "1";
+
 export default function App() {
+  // Checked before any product state exists: the harness shares nothing with the dashboard beyond
+  // the model modules, and mounting the app around it would put tabs and headers in the video.
+  if (IS_RENDER_MODE) {
+    session.projectSlug = new URLSearchParams(window.location.search).get("project") ?? "tower-x";
+    return (
+      <Suspense fallback={null}>
+        <RenderHarness />
+      </Suspense>
+    );
+  }
+
+  return <Dashboard />;
+}
+
+function Dashboard() {
   const [health, setHealth] = useState<Health | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [slug, setSlug] = useState<string>("");

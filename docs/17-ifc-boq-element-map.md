@@ -136,7 +136,13 @@ property of the supplied workbook, recorded because it will bite the next person
 Once elements reach cost centres, the sheet's progress curves can drive the model. The **▶ Build**
 control on the IFC Take-off tab plays periods 1→12: the structure rises by each centre's
 `Actual_Pct_Complete` while every element is coloured by that centre's alert level. Video:
-`presentation/tower-4d-build.mp4` (7s).
+`presentation/tower-4d-build.mp4` — 8s, 1600×900, 240 rendered frames, produced by
+`tools/render_build_video/render.mjs`.
+
+The renderer does not screenshot the product UI. The app publishes a small surface at `/?render=1`
+(`src/components/RenderHarness.tsx`) whose only job is to draw the model and its caption at a fixed
+size and resolve when a requested frame is actually on screen. So renaming a button or moving a
+panel cannot change or silently break the video.
 
 ### What is from the data
 
@@ -166,17 +172,29 @@ Two smaller rules, both to avoid hiding trouble:
 
 ### Regenerating the video
 
-Play the sequence (or scrub the slider, which steps in quarter-periods while a build is loaded),
-capture one frame per period, then:
-
 ```bash
-ffmpeg -y -framerate 0.7 -i f%02d.jpg \
-  -vf "crop=700:640:186:62,scale=1200:-2,minterpolate=fps=30:mi_mode=blend,format=yuv420p" \
-  -c:v libx264 -crf 20 -movflags +faststart tower-4d-build.mp4
+node tools/render_build_video/render.mjs          # 240 frames @ 30fps → 8s at 1600×900
 ```
 
-Frames must be captured in a real browser — headless Chromium has no WebGL here, so the viewer never
-initialises.
+Needs the dev server and API up (`/run_system`), and takes about a minute. See
+`.claude/commands/render-video.md`.
+
+**Determinism is the contract.** The same data renders byte-identical frames every time — verified
+by rendering twice with `--keep-frames` and diffing the frame checksums. That is what
+`buildSequence`'s storey-then-GlobalId ordering is for, and the renderer is what makes the claim
+testable rather than aspirational. Nothing is paced by a wall clock: each frame is requested,
+awaited until the model reports it has finished redrawing, then captured.
+
+#### Correction: headless WebGL does work here
+
+An earlier version of this document said frames had to be captured in a real browser because
+"headless Chromium has no WebGL here". **That was wrong, and it was the binary rather than the
+flags.** The stripped `chrome-headless-shell` builds bundled with Playwright and Puppeteer crash
+creating a WebGL context on this machine; the full Google Chrome app in `--headless=new` gets a real
+GPU (ANGLE Metal) with no flags at all. `--enable-unsafe-swiftshader` would not have helped.
+
+The renderer tries the full Chrome first and falls back to a known-good headless shell; `--browser`
+overrides both.
 
 ---
 

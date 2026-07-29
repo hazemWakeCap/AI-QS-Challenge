@@ -1,4 +1,5 @@
 import * as OBC from "@thatopen/components";
+import type * as FRAGS from "@thatopen/fragments";
 import * as THREE from "three";
 
 // The fragments worker ships inside the package. Bundling it through Vite (?url) instead of
@@ -38,6 +39,12 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
   const fragments = components.get(OBC.FragmentsManager);
   fragments.init(fragmentsWorkerUrl);
 
+  // Fragments throttles `update()` to one call per `maxUpdateRate` ms (default 100) and silently
+  // drops the rest. Animating the model means asking for updates far faster than that, so the
+  // throttle turns most frames into no-ops. It is read live on every call, so clearing it here is
+  // enough; pacing is then whatever the caller asks for.
+  fragments.core.settings.maxUpdateRate = 0;
+
   // Every model that lands in the manager gets wired to this world's camera + scene.
   fragments.list.onItemSet.add(({ value: model }) => {
     model.useCamera(world.camera.three);
@@ -60,6 +67,38 @@ export async function createViewer(container: HTMLElement): Promise<Viewer> {
       }
     },
   };
+}
+
+/**
+ * Waits until the model has actually finished redrawing, rather than guessing.
+ *
+ * <b>Why this is not just `await update()`.</b> Fragments processes a model as a progressive sweep
+ * on a worker, and every visibility or colour change restarts that sweep from the beginning. So
+ * `update(false)` returns long before the pixels are right, and `update(true)` waits for a sweep
+ * that the next mutation is about to invalidate anyway. `onViewUpdated` is the library's own signal
+ * that a view cycle completed, which is the only honest answer to "is this frame done".
+ *
+ * The timeout is a safety valve, not a pacing mechanism: a model with nothing left to do may never
+ * fire the event at all, and an exporter must not hang on a frame that was already correct.
+ */
+export async function settle(
+  viewer: Viewer,
+  model: FRAGS.FragmentsModel,
+  timeoutMs = 2000,
+): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      model.onViewUpdated.remove(finish);
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    model.onViewUpdated.add(finish);
+    void viewer.fragments.core.update(true);
+  });
 }
 
 /**
