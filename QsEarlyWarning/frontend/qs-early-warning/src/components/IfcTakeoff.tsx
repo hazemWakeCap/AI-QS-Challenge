@@ -1,26 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type CostMap, type TakeoffLineRequest, type TakeoffPricing } from "../api/client";
 import { money, millions, DASH } from "../format";
+import { hex, legendFor, type PaintMode } from "../model/costPaint";
+import { buildCostLinks, TIER_CONFIDENCE, type CostLinkResult } from "../model/ifcCostLink";
 import { fetchBundledIfc, loadIfc, readIfcFile } from "../model/ifcLoader";
 import { measureModel, type ModelMeasurement } from "../model/ifcMeasure";
+import { paintIfcByCost, unplacedLegend } from "../model/ifcPaint";
 import { mapToZones, type ZoneMapResult } from "../model/ifcZoneMap";
 import { createViewer, fitToBounds, type Viewer } from "../model/viewer";
 import { Spinner } from "./Loading";
 import * as THREE from "three";
+import type * as FRAGS from "@thatopen/fragments";
 
 /**
- * IFC Take-off — measure a real model, price it with this project's rate library.
+ * IFC Take-off — measure a real model, price it with this project's rate library, and show where
+ * the cost plan would put it.
  *
- * The other 3D tab answers "where is my money in trouble" for a project we already run. This one
- * answers the other half of the job: here is a building nobody has priced — what does it cost, and
- * can it even be measured?
+ * The other 3D tab answers "where is my money in trouble" on a massing we derived from the BOQ.
+ * This one starts from the opposite end: here is a real building nobody has priced — what does it
+ * cost, can it even be measured, and how firmly does each element bind to a budget?
  *
- * Deliberately absent: CPI, alert levels, watchlist. The loaded model has no cost history and we
- * do not invent one for it.
+ * The colours are Tower X's zone cost. The geometry is not Tower X. That gap is the point of the
+ * exercise and is stated on the page rather than papered over: what travels between an arbitrary
+ * model and a cost plan is the *mechanism*, and the honest measure of it is how much of the model
+ * the mechanism can place, at what confidence.
  */
-export function IfcTakeoff() {
+/** Share of a total, as a whole-number percentage. Returns a dash when there is nothing to divide. */
+const pct = (n: number, total: number) => (total > 0 ? `${((100 * n) / total).toFixed(0)}%` : DASH);
+
+export function IfcTakeoff({ period }: { period: number }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<Viewer | null>(null);
+  /** The loaded model, held so a repaint never has to re-parse 8 MB of IFC. */
+  const modelRef = useRef<FRAGS.FragmentsModel | null>(null);
 
   const [status, setStatus] = useState<string>("Starting viewer…");
   const [busy, setBusy] = useState(true);
@@ -29,10 +41,16 @@ export function IfcTakeoff() {
   const [measurement, setMeasurement] = useState<ModelMeasurement | null>(null);
   const [pricing, setPricing] = useState<TakeoffPricing | null>(null);
   const [zoneMap, setZoneMap] = useState<ZoneMapResult | null>(null);
+  const [links, setLinks] = useState<CostLinkResult | null>(null);
   // Tower X's cost map, used only to report which of ITS zones this model reaches — never to
   // suggest the loaded building shares that budget.
   const [costMap, setCostMap] = useState<CostMap | null>(null);
   const [showRules, setShowRules] = useState(false);
+
+  /** Period shown in this tab. Seeded from the app selector, then scrubbable in place. */
+  const [viewPeriod, setViewPeriod] = useState(period);
+  useEffect(() => setViewPeriod(period), [period]);
+  const [paintMode, setPaintMode] = useState<PaintMode>("cpi");
 
   /** Load → measure → price. One path, whether the bytes came from the bundle or a file picker. */
   const ingest = useCallback(async (bytes: Uint8Array, name: string) => {
@@ -44,6 +62,7 @@ export function IfcTakeoff() {
     setMeasurement(null);
     setPricing(null);
     setZoneMap(null);
+    setLinks(null);
     setFileName(name);
 
     try {
@@ -51,6 +70,7 @@ export function IfcTakeoff() {
       const model = await loadIfc(viewer, bytes, (p) =>
         setStatus(`Converting IFC… ${Math.round(p * 100)}%`),
       );
+      modelRef.current = model;
 
       const boxes = await model.getBoxes();
       if (boxes?.length) {
@@ -85,14 +105,10 @@ export function IfcTakeoff() {
 
       setPricing(await api.priceTakeoff(lines, measured.report.totalElements));
 
-      // Classify against Tower X's zones and report how much of the model a rule set can place.
-      // Fetched per ingest rather than cached in state: `ingest` is a dependency of the viewer
-      // effect, so making it depend on cost-map state would tear the viewer down and re-load the
-      // 8 MB IFC every time the map arrived.
-      const cm = await api.costMap().catch(() => null);
-      setCostMap(cm);
-      setZoneMap(mapToZones(measured.byClass, measured.report.storeys, (cm?.zones ?? []).map((z) => z.zoneCode)));
-
+      // Zone classification, linking and paint all depend on the cost map at the SELECTED period,
+      // so they live in their own effect keyed on `measurement`. Doing them here would make
+      // `ingest` — a dependency of the viewer effect — depend on period state, which would tear the
+      // viewer down and re-parse the 8 MB IFC on every scrub.
       setStatus("");
     } catch (e) {
       setErr(String((e as Error).message ?? e));
@@ -134,10 +150,62 @@ export function IfcTakeoff() {
     return () => {
       cancelled = true;
       viewerRef.current = null;
+      modelRef.current = null;
       owned?.dispose();
       host.querySelectorAll("canvas").forEach((c) => c.remove());
     };
   }, [ingest]);
+
+  // ── locate in the cost plan, then paint ──
+  // Re-runs on a new model, a period scrub, or a mode switch. It never touches the viewer
+  // lifecycle, so scrubbing recolours the model already on screen rather than reloading it.
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    const model = modelRef.current;
+    if (!viewer || !model || !measurement) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const [cm, centres] = await Promise.all([
+          api.costMap(viewPeriod).catch(() => null),
+          api.costCentres(viewPeriod).catch(() => []),
+        ]);
+        if (cancelled) return;
+
+        setCostMap(cm);
+        const zones = cm?.zones ?? [];
+
+        const zm = mapToZones(
+          measurement.byClass,
+          measurement.report.storeys,
+          zones.map((z) => z.zoneCode),
+        );
+        if (cancelled) return;
+        setZoneMap(zm);
+
+        const linked = buildCostLinks(measurement, zm, {
+          zoneCodes: zones.map((z) => z.zoneCode),
+          // Both identifiers a cost centre is known by — an element naming either one was authored
+          // with this cost plan in view, even when it names no zone we could paint it into.
+          centreCodes: centres.flatMap((c) => [c.bccId, c.packageCode]).filter(Boolean),
+        });
+        if (cancelled) return;
+        setLinks(linked);
+
+        await paintIfcByCost(viewer, model, zm, zones, paintMode, {
+          tierByLocalId: linked.tierByLocalId,
+        });
+      } catch (e) {
+        if (!cancelled) setErr(String((e as Error).message ?? e));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [measurement, viewPeriod, paintMode]);
 
   const onPick = async (file: File | undefined) => {
     if (!file) return;
@@ -154,6 +222,38 @@ export function IfcTakeoff() {
       <div className="card modelview-stage">
         <div className="panel-head">
           <span className="muted small mono">{fileName}</span>
+
+          {costMap && (
+            <div className="scrub">
+              <label htmlFor="takeoff-period" className="muted small">Period</label>
+              <input
+                id="takeoff-period"
+                type="range"
+                min={costMap.minPeriod}
+                max={costMap.maxPeriod}
+                value={viewPeriod}
+                onChange={(e) => setViewPeriod(Number(e.target.value))}
+                aria-label={`Reporting period ${viewPeriod}`}
+              />
+              <span className="mono small">{viewPeriod}</span>
+            </div>
+          )}
+
+          <div className="seg">
+            <button
+              className={`btn sm ${paintMode === "cpi" ? "primary" : "ghost"}`}
+              onClick={() => setPaintMode("cpi")}
+            >
+              Cost performance
+            </button>
+            <button
+              className={`btn sm ${paintMode === "exposure" ? "primary" : "ghost"}`}
+              onClick={() => setPaintMode("exposure")}
+            >
+              Unspent exposure
+            </button>
+          </div>
+
           <label className="btn secondary sm file-pick">
             Load another IFC
             <input
@@ -174,11 +274,28 @@ export function IfcTakeoff() {
           )}
         </div>
 
+        {zoneMap && (
+          <div className="model-legend">
+            {legendFor(paintMode).map((l) => (
+              <span key={l.label} className="legend-item" title={l.note}>
+                <i style={{ background: hex(l.color) }} aria-hidden="true" />
+                {l.label}
+              </span>
+            ))}
+            <span className="legend-item" title={unplacedLegend.note}>
+              <i style={{ background: hex(unplacedLegend.color) }} aria-hidden="true" />
+              {unplacedLegend.label}
+            </span>
+          </div>
+        )}
+
         <p className="provenance-badge">
           <strong>This is not Tower X.</strong> It is a school&apos;s structural model (Autodesk
-          Revit sample, IFC4) being priced with <strong>Tower X&apos;s rate library</strong>. The two
-          buildings are unrelated — what is being demonstrated is that a rate library travels to any
-          model you can measure.{" "}
+          Revit sample, IFC4) being priced with <strong>Tower X&apos;s rate library</strong> and
+          coloured with <strong>Tower X&apos;s zone cost</strong>. The two buildings are unrelated —
+          what is being demonstrated is that a rate library and a cost plan travel to any model you
+          can measure. A colour here means &ldquo;an element of this kind maps to a zone in that
+          state&rdquo;, never that this building holds that budget.{" "}
           <button className="btn ghost sm" onClick={() => setShowRules((s) => !s)}>
             {showRules ? "Hide pricing rules" : "Show pricing rules"}
           </button>
@@ -383,6 +500,79 @@ export function IfcTakeoff() {
                 <div className="kpi-sub">of {costMap?.zones.length ?? 0} in the cost plan</div>
               </div>
             </div>
+
+            {links && (
+              <>
+                <h4>At what confidence</h4>
+                <table className="grid">
+                  <tbody>
+                    <tr>
+                      <td>
+                        <b>Direct</b>
+                        <span className="muted small">
+                          {" "}· the element&apos;s own properties name a zone
+                        </span>
+                      </td>
+                      <td className="num mono">{TIER_CONFIDENCE.Direct.toFixed(2)}</td>
+                      <td className="num">
+                        {links.directCount}
+                        <span className="muted small">
+                          {" "}({pct(links.directCount, links.totalElements)})
+                        </span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <b>Grouped</b>
+                        <span className="muted small"> · placed by a class + storey rule</span>
+                      </td>
+                      <td className="num mono">{TIER_CONFIDENCE.Grouped.toFixed(2)}</td>
+                      <td className="num">
+                        {links.groupedCount}
+                        <span className="muted small">
+                          {" "}({pct(links.groupedCount, links.totalElements)})
+                        </span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <b>None</b>
+                        <span className="muted small"> · no rule reached it</span>
+                      </td>
+                      <td className="num muted">{DASH}</td>
+                      <td className="num">
+                        {links.noneCount}
+                        <span className="muted small">
+                          {" "}({pct(links.noneCount, links.totalElements)})
+                        </span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                {links.directCount === 0 && (
+                  <p className="note-warn">
+                    <b>Nothing in this model links directly.</b> Not one of its{" "}
+                    {links.totalElements} elements carries a cost code in its property sets, so every
+                    placement above is a rule&apos;s inference about a category rather than a
+                    statement by whoever authored the model. That is normal for a structural export
+                    — and it is exactly the ceiling a QS should know about before trusting a
+                    model-driven cost figure. Elements are drawn at reduced opacity to say so.
+                  </p>
+                )}
+
+                {links.codeCarryingElements > 0 && (
+                  <p className="muted small">
+                    {links.codeCarryingElements} element
+                    {links.codeCarryingElements === 1 ? "" : "s"} carry a recognised cost identifier
+                    {links.codesFound.length > 0 && (
+                      <> — <span className="mono">{links.codesFound.slice(0, 8).join(", ")}</span></>
+                    )}
+                    .
+                  </p>
+                )}
+              </>
+            )}
 
             <p className="note-warn">
               This shows the <b>mechanism</b>, not a budget. The loaded model is a school and the zones

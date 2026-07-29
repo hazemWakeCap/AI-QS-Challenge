@@ -161,7 +161,7 @@ export default function App() {
             )}
             {tab === "ifc" && (
               <Suspense fallback={<section className="card"><Spinner /></section>}>
-                <IfcTakeoff />
+                <IfcTakeoff period={period} />
               </Suspense>
             )}
             {/* Shared cost-centre inspector: opened from the grid AND from a zone in the 3D view,

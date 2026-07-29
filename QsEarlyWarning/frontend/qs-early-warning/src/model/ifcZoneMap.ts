@@ -49,12 +49,16 @@ export interface ZoneMatch {
   zoneCode: string;
   elementCount: number;
   ifcClasses: string[];
+  /** The elements placed here, by the id the Fragments model knows them by — what paints. */
+  localIds: number[];
 }
 
 export interface ZoneMapResult {
   matched: ZoneMatch[];
   /** Classes no rule placed, with their element counts. */
   unmatched: { ifcClass: string; elementCount: number }[];
+  /** Every element no rule placed. Painted as a ghost, so "unplaced" is visible rather than absent. */
+  unmatchedLocalIds: number[];
   matchedElements: number;
   totalElements: number;
   /** 0..1 — the share of the model a rule placed. The headline. */
@@ -78,31 +82,36 @@ export function mapToZones(
 ): ZoneMapResult {
   const matches = new Map<string, ZoneMatch>();
   const unmatchedByClass = new Map<string, number>();
+  const unmatchedLocalIds: number[] = [];
   let matchedElements = 0;
   let totalElements = 0;
 
   for (const c of byClass) {
     totalElements += c.elementCount;
 
-    for (const [storey, count] of Object.entries(c.byStorey)) {
+    for (const [storey, ids] of Object.entries(c.idsByStorey)) {
+      const count = ids.length;
       const rule = ZONE_RULES.find(
         (r) => r.ifcClass === c.ifcClass && (!r.storey || (storey !== "(none)" && r.storey(storey))),
       );
 
       if (!rule) {
         unmatchedByClass.set(c.ifcClass, (unmatchedByClass.get(c.ifcClass) ?? 0) + count);
+        unmatchedLocalIds.push(...ids);
         continue;
       }
 
       const existing = matches.get(rule.zoneCode);
       if (existing) {
         existing.elementCount += count;
+        existing.localIds.push(...ids);
         if (!existing.ifcClasses.includes(c.ifcClass)) existing.ifcClasses.push(c.ifcClass);
       } else {
         matches.set(rule.zoneCode, {
           zoneCode: rule.zoneCode,
           elementCount: count,
           ifcClasses: [c.ifcClass],
+          localIds: [...ids],
         });
       }
       matchedElements += count;
@@ -119,6 +128,7 @@ export function mapToZones(
   return {
     matched,
     unmatched: unmatched.sort((a, b) => b.elementCount - a.elementCount),
+    unmatchedLocalIds,
     matchedElements,
     totalElements,
     matchRate: totalElements > 0 ? matchedElements / totalElements : 0,

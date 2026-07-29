@@ -40,8 +40,18 @@ export interface ClassMeasurement {
    * Element counts per building storey, "(none)" for elements in no storey. Carried per class so a
    * downstream rule can place a slab by the level it sits on — testing the storey against the whole
    * class instead would send every slab wherever the first matching level pointed.
+   *
+   * Derived from `idsByStorey` — the two can never disagree.
    */
   byStorey: Record<string, number>;
+  /**
+   * The localIds behind each storey's count.
+   *
+   * The counts alone are enough to report a take-off, but not to *show* one: colouring an element
+   * needs the id the Fragments model knows it by. Carrying the ids alongside the counts is what
+   * lets a zone rule's verdict travel back to the geometry it was decided on.
+   */
+  idsByStorey: Record<string, number[]>;
   /** Elements of this class in the model. */
   elementCount: number;
   /** Elements that yielded a volume. */
@@ -68,6 +78,13 @@ export interface MeasurabilityReport {
 export interface ModelMeasurement {
   byClass: ClassMeasurement[];
   report: MeasurabilityReport;
+  /**
+   * localId → the distinct text values in that element's property sets.
+   *
+   * Raw material for `ifcCostLink`: if the exporter wrote a cost code anywhere into the model, it
+   * is in here, and an element that carries its own code does not need a rule to guess for it.
+   */
+  psetTextByLocalId: Map<number, string[]>;
 }
 
 /** Classes worth measuring for a cost take-off — structural and architectural bulk. */
@@ -88,6 +105,7 @@ export async function measureModel(model: FRAGS.FragmentsModel): Promise<ModelMe
   const byClass: ClassMeasurement[] = [];
   const keysSeen = new Set<string>();
   const measuredIds = new Set<number>();
+  const psetTextByLocalId = new Map<number, string[]>();
   let totalElements = 0;
   let measuredElements = 0;
 
@@ -100,12 +118,17 @@ export async function measureModel(model: FRAGS.FragmentsModel): Promise<ModelMe
     for (const id of localIds) measuredIds.add(id);
 
     const measurement: ClassMeasurement = {
-      ifcClass, elementCount: localIds.length, byStorey: {},
+      ifcClass, elementCount: localIds.length, byStorey: {}, idsByStorey: {},
       volumeCount: 0, volume: 0, areaCount: 0, area: 0,
     };
     for (const id of localIds) {
       const storey = storeyOf.get(id) ?? "(none)";
-      measurement.byStorey[storey] = (measurement.byStorey[storey] ?? 0) + 1;
+      (measurement.idsByStorey[storey] ??= []).push(id);
+    }
+    // Counts are derived, never accumulated separately — a count that could drift from the ids
+    // behind it would let the tables and the painted model tell different stories.
+    for (const [storey, ids] of Object.entries(measurement.idsByStorey)) {
+      measurement.byStorey[storey] = ids.length;
     }
 
     // Pull the property sets in one call per class rather than per element.
@@ -118,7 +141,15 @@ export async function measureModel(model: FRAGS.FragmentsModel): Promise<ModelMe
       },
     });
 
-    for (const item of data) {
+    for (const [index, item] of data.entries()) {
+      // `getItemsData` preserves the order it was asked in; `_localId` is authoritative when the
+      // model carries it, and the positional fallback keeps the mapping honest when it does not.
+      const localId = (item as { _localId?: { value?: number } })._localId?.value ?? localIds[index];
+      if (typeof localId === "number") {
+        const text = psetText(item);
+        if (text.length > 0) psetTextByLocalId.set(localId, text);
+      }
+
       const props = flattenPsets(item);
       for (const key of Object.keys(props)) keysSeen.add(key);
 
@@ -149,6 +180,7 @@ export async function measureModel(model: FRAGS.FragmentsModel): Promise<ModelMe
 
   return {
     byClass,
+    psetTextByLocalId,
     report: {
       totalElements,
       measuredElements,
@@ -206,9 +238,9 @@ async function storeysOf(model: FRAGS.FragmentsModel): Promise<string[]> {
   }
 }
 
-/** Flattens an item's property sets into a lower-cased name → number map. */
-function flattenPsets(item: FRAGS.ItemData): Record<string, number> {
-  const out: Record<string, number> = {};
+/** Every (name, raw value) pair across an item's property sets. */
+function psetEntries(item: FRAGS.ItemData): [string, string | number | boolean][] {
+  const out: [string, string | number | boolean][] = [];
   const psets = (item.IsDefinedBy as FRAGS.ItemData[] | undefined) ?? [];
 
   for (const pset of psets) {
@@ -219,12 +251,42 @@ function flattenPsets(item: FRAGS.ItemData): Record<string, number> {
       const name = prop.Name && "value" in prop.Name ? String(prop.Name.value) : null;
       const raw = prop.NominalValue && "value" in prop.NominalValue ? prop.NominalValue.value : null;
       if (!name || raw === null || raw === undefined) continue;
-
-      const num = typeof raw === "number" ? raw : Number(raw);
-      if (Number.isFinite(num)) out[name.trim().toLowerCase()] = num;
+      out.push([name.trim().toLowerCase(), raw as string | number | boolean]);
     }
   }
   return out;
+}
+
+/** Flattens an item's property sets into a lower-cased name → number map. */
+function flattenPsets(item: FRAGS.ItemData): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [name, raw] of psetEntries(item)) {
+    const num = typeof raw === "number" ? raw : Number(raw);
+    if (Number.isFinite(num)) out[name] = num;
+  }
+  return out;
+}
+
+/**
+ * The distinct non-numeric property VALUES on an item, lower-cased.
+ *
+ * Quantities live in property values that parse as numbers; identifiers do not. Reading only the
+ * numeric ones — which is all a take-off needs — throws away every code an exporter wrote into the
+ * model, and a cost code in a property set is the strongest link an element can have to a budget.
+ * So the text is kept alongside the numbers, and `ifcCostLink` decides which of it means anything.
+ *
+ * Values, not names: nobody knows what an exporter called the field, but the code itself is the
+ * code wherever it was put.
+ */
+function psetText(item: FRAGS.ItemData): string[] {
+  const out = new Set<string>();
+  for (const [, raw] of psetEntries(item)) {
+    if (typeof raw === "number") continue;
+    const text = String(raw).trim().toLowerCase();
+    // Numeric-looking strings are quantities that happened to be written as text, not identifiers.
+    if (text.length > 0 && !Number.isFinite(Number(text))) out.add(text);
+  }
+  return [...out];
 }
 
 function matches(key: string, keys: string[]): boolean {
