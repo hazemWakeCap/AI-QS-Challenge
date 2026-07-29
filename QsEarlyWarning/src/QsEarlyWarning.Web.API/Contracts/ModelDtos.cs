@@ -166,6 +166,47 @@ public sealed record QuantityVarianceDto(
 /// <summary>A priced item the model could not be compared against, and why.</summary>
 public sealed record UncomparableQuantityDto(string BoqItemRef, string Reason);
 
+/// <summary>
+/// The authored IFC-element → BOQ-item register, joined to the bill and to the cost centres.
+///
+/// <para>Deliberately has no period parameter. The register is static, so the client fetches it once
+/// and scrubbing the period rejoins against the cost-centre array it already holds rather than
+/// refetching a hundred kilobytes of geometry bindings.</para>
+///
+/// <para>Normalised on purpose: <see cref="Items"/> and <see cref="Rules"/> hold what would
+/// otherwise repeat on every one of ~1,600 element rows.</para>
+/// </summary>
+public sealed record ElementMapDto(
+    string ProjectSlug,
+    string Currency,
+    IReadOnlyList<MappedElementDto> Elements,
+    IReadOnlyList<MappedItemDto> Items,
+    IReadOnlyList<MappingRuleDto> Rules,
+    IReadOnlyList<UnmappedClassDto> Unmapped,
+    int MappedElements,
+    int TotalElements,
+    string MappingBasis);
+
+/// <param name="BoqItemRefs">Empty means the bill prices nothing for this element.</param>
+/// <param name="Confidence">The weakest binding this element rests on.</param>
+public sealed record MappedElementDto(
+    string GlobalId, string IfcClass, string? Storey,
+    IReadOnlyList<string> BoqItemRefs, double Confidence);
+
+/// <summary>A BOQ item the model reaches, with the cost centre it is the same thing as.</summary>
+/// <param name="BccId">Resolved through <c>WBS_Code</c>, which IS the BOQ item ref — a real 1:1 in
+/// the source data, not an authored link.</param>
+public sealed record MappedItemDto(
+    string BoqItemRef, string? Description, string? Unit,
+    double UnitRate, double? BoqQuantity, string? BccId);
+
+/// <summary>One declared class → item binding, shown so a QS can disagree with it.</summary>
+public sealed record MappingRuleDto(
+    string IfcClass, string BoqItemRef, string Role, string Basis, double Confidence, int ElementCount);
+
+/// <summary>A class the model contains that the bill prices nothing for.</summary>
+public sealed record UnmappedClassDto(string IfcClass, int ElementCount, string Reason);
+
 /// <summary>The parametric massing spec plus the provenance table that justifies it.</summary>
 public sealed record GeometrySpecDto(
     string ProjectSlug,

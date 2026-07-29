@@ -103,6 +103,63 @@ public sealed class ModelController : ControllerBase
                 d.Key, d.Label, d.Value, d.Unit, d.SourceItemRef, d.SourceDescription, d.Derivation)).ToList()));
     }
 
+    /// <summary>
+    /// The authored IFC-element → BOQ-item register, joined to the bill and the cost centres.
+    ///
+    /// <para>This is what lets sheet data be read off the model. The register supplies one hop —
+    /// element to BOQ item — and everything after it is genuine workbook data: the item ref IS the
+    /// cost centre's <c>WBS_Code</c>, so an element reaches twelve periods of earned value without
+    /// anything further being invented.</para>
+    ///
+    /// <para>No period parameter: the register does not move with time.</para>
+    /// </summary>
+    [HttpGet("element-map")]
+    public async Task<ActionResult<ElementMapDto>> ElementMap(CancellationToken ct = default)
+    {
+        var res = await Resolve(ct);
+        if (res.Error is not null) return res.Error;
+        var (project, snapshot) = (res.Project!, res.Snapshot!);
+
+        var map = snapshot.ElementMap;
+        if (map is null)
+            return NotFound($"Project '{project.Slug}' has no IFC element register.");
+
+        var rates = snapshot.Rates;
+
+        // WBS_Code IS the BOQ item ref — an exact 1:1 in the source data. Reading it off the panel
+        // rather than re-deriving it keeps this endpoint honest about where the link comes from.
+        var bccByItemRef = snapshot.Panel
+            .Where(p => !string.IsNullOrWhiteSpace(p.WbsCode))
+            .GroupBy(p => p.WbsCode!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().BccId, StringComparer.OrdinalIgnoreCase);
+
+        var items = map.BoqItemRefs
+            .Select(itemRef =>
+            {
+                var rate = rates?.Find(itemRef);
+                return new MappedItemDto(
+                    itemRef, rate?.Description, rate?.Unit, rate?.UnitRate ?? 0, rate?.BoqQuantity,
+                    bccByItemRef.TryGetValue(itemRef, out var bcc) ? bcc : null);
+            })
+            .ToList();
+
+        return Ok(new ElementMapDto(
+            project.Slug,
+            project.ReportingCurrency,
+            map.Elements.Select(e => new MappedElementDto(
+                e.GlobalId, e.IfcClass, e.Storey, e.BoqItemRefs, e.Confidence)).ToList(),
+            items,
+            map.Rules.Select(r => new MappingRuleDto(
+                r.IfcClass, r.BoqItemRef, r.Role, r.Basis, r.Confidence, r.ElementCount)).ToList(),
+            map.Unmapped.Select(u => new UnmappedClassDto(
+                u.IfcClass, u.ElementCount, u.Reason)).ToList(),
+            map.MappedCount,
+            map.TotalCount,
+            MappingBasis: "Element-to-BOQ bindings are authored and shipped in data/ifc_boq_map.csv; a real "
+                        + "IFC export carries no cost codes, so this hop cannot be discovered. Everything "
+                        + "downstream is source data: the BOQ item ref is the cost centre's WBS_Code."));
+    }
+
     /// <summary>Prices a take-off measured off any model with this project's unit-rate library.</summary>
     [HttpPost("price-takeoff")]
     public async Task<ActionResult<TakeoffPricingDto>> PriceTakeoff(

@@ -41,6 +41,9 @@ public sealed record ProjectSnapshot
     /// <summary>Phase 2: the unit-rate library projected from the BOQ, used to price a take-off
     /// measured off any model. Null unless this is the estimate's owning project.</summary>
     public RateBook? Rates { get; init; }
+    /// <summary>The authored IFC-element → BOQ-item register, which is what lets sheet data be read
+    /// off the model. Null unless this is the estimate's owning project, or the sidecar is absent.</summary>
+    public IfcElementMap? ElementMap { get; init; }
 
     public int RowCount => Panel.Count;
     public int CentreCount => Panel.Select(p => p.BccId).Distinct(StringComparer.Ordinal).Count();
@@ -69,13 +72,18 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
 {
     private readonly IProjectPanelSource _source;
     private readonly IEstimateSource? _estimate;
+    private readonly IIfcElementMapSource? _elementMap;
     private readonly ConcurrentDictionary<long, ProjectSnapshot> _cache = new();
     private readonly ConcurrentDictionary<long, SemaphoreSlim> _locks = new();
 
-    public ProjectSnapshotRegistry(IProjectPanelSource source, IEstimateSource? estimate = null)
+    public ProjectSnapshotRegistry(
+        IProjectPanelSource source,
+        IEstimateSource? estimate = null,
+        IIfcElementMapSource? elementMap = null)
     {
         _source = source;
         _estimate = estimate;
+        _elementMap = elementMap;
     }
 
     public ProjectSnapshot? TryGet(long projectId) => _cache.TryGetValue(projectId, out var s) ? s : null;
@@ -158,6 +166,12 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
         }
         catch { /* stress test / mix / geometry unavailable for this project; leave null */ }
 
+        // The element register is independent of the estimate load: a missing or malformed sidecar
+        // must leave the take-off, pricing and EVM exactly as they were, not sink the snapshot.
+        IfcElementMap? elementMap = null;
+        try { elementMap = _elementMap?.TryLoadForProject(projectId); }
+        catch { /* register unavailable; the model simply cannot be read against the sheet */ }
+
         return new ProjectSnapshot
         {
             ProjectId = projectId,
@@ -173,6 +187,7 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
             ResourceMix = resourceMix,
             Geometry = geometry,
             Rates = rates,
+            ElementMap = elementMap,
         };
     }
 

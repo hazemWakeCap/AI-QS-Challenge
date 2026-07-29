@@ -161,7 +161,8 @@ export default function App() {
             )}
             {tab === "ifc" && (
               <Suspense fallback={<section className="card"><Spinner /></section>}>
-                <IfcTakeoff period={period} />
+                <IfcTakeoff period={period}
+                            onSelectCentre={(c, p) => { setSelectedCentre(c); setDrawerPeriod(p); }} />
               </Suspense>
             )}
             {/* Shared cost-centre inspector: opened from the grid AND from a zone in the 3D view,

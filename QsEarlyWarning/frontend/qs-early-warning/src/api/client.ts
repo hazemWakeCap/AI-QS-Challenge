@@ -218,6 +218,45 @@ export interface UncomparableQuantity {
   reason: string;
 }
 
+// ── the authored IFC element → BOQ item register (what lets sheet data be read off the model) ──
+
+/** @param boqItemRefs Empty means the bill prices nothing for this element. */
+export interface MappedElement {
+  globalId: string;
+  ifcClass: string;
+  storey: string | null;
+  boqItemRefs: string[];
+  /** The weakest binding this element rests on: 0.9 declared by class, 0.6 inferred from storey. */
+  confidence: number;
+}
+
+/** A BOQ item the model reaches. `bccId` comes from WBS_Code, which IS the item ref in the source. */
+export interface MappedItem {
+  boqItemRef: string;
+  description: string | null;
+  unit: string | null;
+  unitRate: number;
+  boqQuantity: number | null;
+  bccId: string | null;
+}
+
+export interface MappingRule {
+  ifcClass: string; boqItemRef: string; role: string;
+  basis: string; confidence: number; elementCount: number;
+}
+
+export interface UnmappedClass { ifcClass: string; elementCount: number; reason: string }
+
+export interface ElementMap {
+  projectSlug: string; currency: string;
+  elements: MappedElement[];
+  items: MappedItem[];
+  rules: MappingRule[];
+  unmapped: UnmappedClass[];
+  mappedElements: number; totalElements: number;
+  mappingBasis: string;
+}
+
 export const api = {
   health: () => get<Health>("/api/v1/health"),
   projects: () => get<Project[]>("/api/v1/projects"),
@@ -272,6 +311,9 @@ export const api = {
   // phase 2: 3D cost x-ray
   costMap: (period?: number) => get<CostMap>(`/api/v1/model/cost-map${period ? `?period=${period}` : ""}`),
   geometrySpec: () => get<GeometrySpec>("/api/v1/model/geometry-spec"),
+  // No period parameter — the register is static, so scrubbing rejoins against the cost-centre
+  // array already in hand rather than refetching ~1,500 element bindings.
+  elementMap: () => get<ElementMap>("/api/v1/model/element-map"),
   priceTakeoff: (lines: TakeoffLineRequest[], modelElementCount: number) =>
     post<TakeoffPricing>("/api/v1/model/price-takeoff", { lines, modelElementCount }),
 };

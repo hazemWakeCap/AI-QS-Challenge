@@ -30,6 +30,7 @@ assumptions and reconciliation before award, drill into which resource an over-r
 | 9 | Project Management | *Create, import, switch, and delete projects.* | [09-project-management.md](09-project-management.md) |
 | 10 | Data Administration | *Governed CRUD over the underlying tables.* | [10-data-administration.md](10-data-administration.md) |
 | 11 | Multi-Tenant Security | *How is each project's data isolated per user?* | [11-multi-tenant-security.md](11-multi-tenant-security.md) |
+| 12 | IFC → BOQ Element Register | *Click an element: what does the bill say about it?* | [17-ifc-boq-element-map.md](17-ifc-boq-element-map.md) |
 
 ### Deep dives
 

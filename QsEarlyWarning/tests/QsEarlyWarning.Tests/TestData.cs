@@ -5,6 +5,10 @@ public static class TestData
 {
     public static string WorkbookPath { get; } = Locate();
 
+    /// <summary>The authored IFC-element → BOQ-item register, which lives beside the workbook.</summary>
+    public static string ElementMapPath { get; } =
+        Path.Combine(Path.GetDirectoryName(WorkbookPath)!, "ifc_boq_map.csv");
+
     private static string Locate()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

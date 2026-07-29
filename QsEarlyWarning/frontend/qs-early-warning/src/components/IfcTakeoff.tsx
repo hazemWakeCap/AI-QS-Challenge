@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type CostMap, type TakeoffLineRequest, type TakeoffPricing } from "../api/client";
-import { money, millions, DASH } from "../format";
-import { hex, legendFor, type PaintMode } from "../model/costPaint";
+import {
+  api, type CostCentreEvm, type CostMap, type TakeoffLineRequest, type TakeoffPricing,
+} from "../api/client";
+import { money, millions, ratio, DASH } from "../format";
+import { centreLegend, hex, legendFor, type PaintMode } from "../model/costPaint";
 import { buildCostLinks, TIER_CONFIDENCE, type CostLinkResult } from "../model/ifcCostLink";
+import { buildElementIndex, type ElementMapIndex, type ResolvedElement } from "../model/ifcElementMap";
 import { fetchBundledIfc, loadIfc, readIfcFile } from "../model/ifcLoader";
 import { measureModel, type ModelMeasurement } from "../model/ifcMeasure";
-import { paintIfcByCost, unplacedLegend } from "../model/ifcPaint";
+import { paintIfcByCost, paintIfcByCostCentre, unplacedLegend } from "../model/ifcPaint";
+import { elementAtPointer, showSelection } from "../model/ifcPick";
 import { mapToZones, type ZoneMapResult } from "../model/ifcZoneMap";
 import { createViewer, fitToBounds, type Viewer } from "../model/viewer";
 import { Spinner } from "./Loading";
@@ -31,11 +35,22 @@ const pct = (n: number, total: number) => (total > 0 ? `${((100 * n) / total).to
 /** A measured quantity, to one decimal — the precision a take-off is actually good to. */
 const qty = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 1 });
 
-export function IfcTakeoff({ period }: { period: number }) {
+export function IfcTakeoff({
+  period,
+  onSelectCentre,
+}: {
+  period: number;
+  /** Hands a cost centre to the app's shared drawer. The period travels with it: this tab scrubs
+   *  independently, so a drawer opened from period 6 must not show period 12 numbers. */
+  onSelectCentre?: (centre: CostCentreEvm, period: number) => void;
+}) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<Viewer | null>(null);
   /** The loaded model, held so a repaint never has to re-parse 8 MB of IFC. */
   const modelRef = useRef<FRAGS.FragmentsModel | null>(null);
+  /** Live index + selection, read from inside the pointer handler installed once per viewer. */
+  const indexRef = useRef<ElementMapIndex | null>(null);
+  const selectedRef = useRef<number | null>(null);
 
   const [status, setStatus] = useState<string>("Starting viewer…");
   const [busy, setBusy] = useState(true);
@@ -45,6 +60,9 @@ export function IfcTakeoff({ period }: { period: number }) {
   const [pricing, setPricing] = useState<TakeoffPricing | null>(null);
   const [zoneMap, setZoneMap] = useState<ZoneMapResult | null>(null);
   const [links, setLinks] = useState<CostLinkResult | null>(null);
+  const [index, setIndex] = useState<ElementMapIndex | null>(null);
+  const [centres, setCentres] = useState<CostCentreEvm[]>([]);
+  const [selected, setSelected] = useState<ResolvedElement | null>(null);
   // Tower X's cost map, used only to report which of ITS zones this model reaches — never to
   // suggest the loaded building shares that budget.
   const [costMap, setCostMap] = useState<CostMap | null>(null);
@@ -66,6 +84,10 @@ export function IfcTakeoff({ period }: { period: number }) {
     setPricing(null);
     setZoneMap(null);
     setLinks(null);
+    setIndex(null);
+    setSelected(null);
+    indexRef.current = null;
+    selectedRef.current = null;
     setFileName(name);
 
     try {
@@ -128,6 +150,31 @@ export function IfcTakeoff({ period }: { period: number }) {
     let cancelled = false;
     let owned: Viewer | null = null;
 
+    // Same drag guard as the massing tab: a pointer that moved more than 4px was orbiting the
+    // camera, not selecting. Without it every rotation reselects whatever ends up under the cursor.
+    let down: { x: number; y: number } | null = null;
+    const onPointerDown = (e: PointerEvent) => { down = { x: e.clientX, y: e.clientY }; };
+    const onPointerUp = (e: PointerEvent) => {
+      if (!down) return;
+      const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+      down = null;
+      if (moved > 4) return;
+
+      const canvas = host.querySelector("canvas");
+      const viewer = viewerRef.current;
+      const model = modelRef.current;
+      if (!canvas || !viewer || !model) return;
+
+      void (async () => {
+        const localId = await elementAtPointer(viewer, e, canvas);
+        // Clicking the same element again clears it, matching the massing tab's zone toggle.
+        const next = localId !== null && localId === selectedRef.current ? null : localId;
+        await showSelection(viewer, model, next, selectedRef.current);
+        selectedRef.current = next;
+        setSelected(next === null ? null : indexRef.current?.byLocalId.get(next) ?? null);
+      })();
+    };
+
     (async () => {
       try {
         const viewer = await createViewer(host);
@@ -137,6 +184,9 @@ export function IfcTakeoff({ period }: { period: number }) {
         }
         owned = viewer;
         viewerRef.current = viewer;
+
+        host.addEventListener("pointerdown", onPointerDown);
+        host.addEventListener("pointerup", onPointerUp);
 
         setStatus("Fetching bundled model…");
         const bytes = await fetchBundledIfc();
@@ -152,12 +202,42 @@ export function IfcTakeoff({ period }: { period: number }) {
 
     return () => {
       cancelled = true;
+      host.removeEventListener("pointerdown", onPointerDown);
+      host.removeEventListener("pointerup", onPointerUp);
       viewerRef.current = null;
       modelRef.current = null;
+      indexRef.current = null;
+      selectedRef.current = null;
       owned?.dispose();
       host.querySelectorAll("canvas").forEach((c) => c.remove());
     };
   }, [ingest]);
+
+  // ── resolve the authored register against this model ──
+  // Static, so it is fetched once per loaded model rather than on every period scrub.
+  useEffect(() => {
+    const model = modelRef.current;
+    if (!model || !measurement) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const map = await api.elementMap();
+        if (cancelled) return;
+        const built = await buildElementIndex(model, map);
+        if (cancelled) return;
+        indexRef.current = built;
+        setIndex(built);
+      } catch {
+        // No register for this project, or it does not resolve against this model. The tab falls
+        // back to zone placement, which is what it did before the register existed.
+        indexRef.current = null;
+        setIndex(null);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [measurement]);
 
   // ── locate in the cost plan, then paint ──
   // Re-runs on a new model, a period scrub, or a mode switch. It never touches the viewer
@@ -171,13 +251,14 @@ export function IfcTakeoff({ period }: { period: number }) {
 
     (async () => {
       try {
-        const [cm, centres] = await Promise.all([
+        const [cm, evm] = await Promise.all([
           api.costMap(viewPeriod).catch(() => null),
-          api.costCentres(viewPeriod).catch(() => []),
+          api.costCentres(viewPeriod).catch(() => [] as CostCentreEvm[]),
         ]);
         if (cancelled) return;
 
         setCostMap(cm);
+        setCentres(evm);
         const zones = cm?.zones ?? [];
 
         const zm = mapToZones(
@@ -192,14 +273,26 @@ export function IfcTakeoff({ period }: { period: number }) {
           zoneCodes: zones.map((z) => z.zoneCode),
           // Both identifiers a cost centre is known by — an element naming either one was authored
           // with this cost plan in view, even when it names no zone we could paint it into.
-          centreCodes: centres.flatMap((c) => [c.bccId, c.packageCode]).filter(Boolean),
+          centreCodes: evm.flatMap((c) => [c.bccId, c.packageCode]).filter(Boolean),
         });
         if (cancelled) return;
         setLinks(linked);
 
-        await paintIfcByCost(viewer, model, zm, zones, paintMode, {
-          tierByLocalId: linked.tierByLocalId,
-        });
+        // The register is the finer instrument: it colours each element by its own cost centre,
+        // where the zone map can only colour the region the element falls in. Prefer it, and fall
+        // back to zones when no register resolved.
+        if (index) {
+          await paintIfcByCostCentre(viewer, model, index, evm, paintMode);
+        } else {
+          await paintIfcByCost(viewer, model, zm, zones, paintMode, {
+            tierByLocalId: linked.tierByLocalId,
+          });
+        }
+
+        // A repaint overwrites every colour, so the selection marker has to be laid back on top.
+        if (!cancelled && selectedRef.current !== null) {
+          await showSelection(viewer, model, selectedRef.current, null);
+        }
       } catch (e) {
         if (!cancelled) setErr(String((e as Error).message ?? e));
       }
@@ -208,7 +301,7 @@ export function IfcTakeoff({ period }: { period: number }) {
     return () => {
       cancelled = true;
     };
-  }, [measurement, viewPeriod, paintMode]);
+  }, [measurement, viewPeriod, paintMode, index]);
 
   const onPick = async (file: File | undefined) => {
     if (!file) return;
@@ -279,7 +372,9 @@ export function IfcTakeoff({ period }: { period: number }) {
 
         {zoneMap && (
           <div className="model-legend">
-            {legendFor(paintMode).map((l) => (
+            {/* The register paints each element by its own cost centre, so the categorical key is
+                the centre's alert level, not a zone rollup. The exposure ramp is the same either way. */}
+            {(index && paintMode === "cpi" ? centreLegend() : legendFor(paintMode)).map((l) => (
               <span key={l.label} className="legend-item" title={l.note}>
                 <i style={{ background: hex(l.color) }} aria-hidden="true" />
                 {l.label}
@@ -335,6 +430,100 @@ export function IfcTakeoff({ period }: { period: number }) {
 
       <div className="modelview-side">
         {err && <div className="error">{err}</div>}
+
+        {index && (
+          <div className="card">
+            <h3>Selected element</h3>
+            {!selected && (
+              <p className="muted small">
+                Click any element in the model. {index.map.mappedElements} of{" "}
+                {index.map.totalElements} carry a binding to the bill.
+              </p>
+            )}
+
+            {selected && (
+              <>
+                <table className="grid">
+                  <tbody>
+                    <tr><td>Class</td><td className="mono">{selected.element.ifcClass}</td></tr>
+                    <tr><td>Storey</td><td>{selected.element.storey ?? DASH}</td></tr>
+                    <tr>
+                      <td>GlobalId</td>
+                      <td className="mono small">{selected.element.globalId}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                {selected.items.length === 0 ? (
+                  <p className="note-warn">
+                    <b>The bill prices nothing for this element.</b> It is real work the model
+                    contains and the estimate never carried — scope, not an error.
+                  </p>
+                ) : (
+                  <>
+                    <h4>In the bill</h4>
+                    {selected.items.map((item) => {
+                      const centre = centres.find((c) => c.bccId === item.bccId);
+                      return (
+                        <div key={item.boqItemRef} className="detail-section">
+                          <div>
+                            <span className="mono">{item.boqItemRef}</span>
+                            <span className="muted small"> · {item.description}</span>
+                          </div>
+                          <div className="muted small">
+                            {item.unitRate.toLocaleString(undefined, { maximumFractionDigits: 2 })}{" "}
+                            {pricing?.currency ?? "AED"}/{item.unit} · bill quantity{" "}
+                            {item.boqQuantity?.toLocaleString() ?? DASH} {item.unit}
+                          </div>
+
+                          {centre ? (
+                            <>
+                              <div className="kpis kpis-2">
+                                <div className="kpi">
+                                  <div className="kpi-v">{ratio(centre.cpi)}</div>
+                                  <div className="kpi-l">CPI</div>
+                                  <div className="kpi-sub">{centre.alertLevel}</div>
+                                </div>
+                                <div className="kpi">
+                                  <div className="kpi-v">
+                                    {millions(centre.bac, pricing?.currency ?? "AED")}
+                                  </div>
+                                  <div className="kpi-l">budget at completion</div>
+                                  <div className="kpi-sub">
+                                    EV {millions(centre.ev, pricing?.currency ?? "AED")} · AC{" "}
+                                    {millions(centre.ac, pricing?.currency ?? "AED")}
+                                  </div>
+                                </div>
+                              </div>
+                              <button
+                                className="btn primary sm"
+                                onClick={() => onSelectCentre?.(centre, viewPeriod)}
+                              >
+                                Open {centre.bccId}
+                              </button>
+                            </>
+                          ) : (
+                            <p className="muted small">
+                              Cost centre <span className="mono">{item.bccId ?? DASH}</span> carries
+                              no row at period {viewPeriod}.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    <p className="muted small">
+                      Bound at confidence {selected.element.confidence.toFixed(1)} —{" "}
+                      {selected.element.confidence >= 0.9
+                        ? "declared by element class."
+                        : "inferred from the storey it sits on; the model carries no relationship to confirm it."}
+                    </p>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {pricing && (
           <div className="card">
@@ -574,7 +763,91 @@ export function IfcTakeoff({ period }: { period: number }) {
               </div>
             </div>
 
-            {links && (
+            {index && (
+              <>
+                <h4>At what confidence</h4>
+                <table className="grid">
+                  <tbody>
+                    {index.confidenceBands.map((b) => (
+                      <tr key={b.confidence}>
+                        <td>
+                          <b>{b.label}</b>
+                        </td>
+                        <td className="num mono">
+                          {b.confidence > 0 ? b.confidence.toFixed(1) : DASH}
+                        </td>
+                        <td className="num">
+                          {b.elementCount}
+                          <span className="muted small">
+                            {" "}({pct(b.elementCount, index.map.totalElements)})
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <p className="muted small">{index.map.mappingBasis}</p>
+
+                <h4>The bindings</h4>
+                <div className="grid-scroll">
+                  <table className="grid">
+                    <thead>
+                      <tr>
+                        <th>Class</th>
+                        <th>BOQ item</th>
+                        <th className="num">n</th>
+                        <th>Why</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {index.map.rules.map((r) => (
+                        <tr key={`${r.ifcClass}-${r.boqItemRef}`}>
+                          <td className="mono small">{r.ifcClass}</td>
+                          <td className="mono">
+                            {r.boqItemRef}
+                            <span className="muted small"> {r.role}</span>
+                          </td>
+                          <td className="num">{r.elementCount}</td>
+                          <td className="muted small">{r.basis}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {index.map.unmapped.length > 0 && (
+                  <>
+                    <h4>In the model, not in the bill</h4>
+                    <p className="note-warn">
+                      These are not failures to map. They are scope the estimate never priced —
+                      the earliest kind of gap a QS can act on.
+                    </p>
+                    <table className="grid">
+                      <tbody>
+                        {index.map.unmapped.map((u) => (
+                          <tr key={u.ifcClass}>
+                            <td className="mono">{u.ifcClass}</td>
+                            <td className="num">{u.elementCount}</td>
+                            <td className="muted small">{u.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+
+                {index.notInModel > 0 && (
+                  <p className="note-warn">
+                    {index.notInModel} element{index.notInModel === 1 ? "" : "s"} in the register
+                    could not be found in the loaded file — the register and this model have drifted
+                    apart.
+                  </p>
+                )}
+              </>
+            )}
+
+            {!index && links && (
               <>
                 <h4>At what confidence</h4>
                 <table className="grid">

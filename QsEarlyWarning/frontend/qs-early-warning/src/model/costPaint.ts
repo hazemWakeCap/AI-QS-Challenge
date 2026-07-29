@@ -49,6 +49,37 @@ export function colorFor(zone: ZoneCost, mode: PaintMode, maxUnspent: number): n
   return zone.amberCount > 0 ? MIXED : GOOD;
 }
 
+/**
+ * Colour for a single cost centre's alert level.
+ *
+ * Lives here rather than beside the element map so there is exactly one place that decides what
+ * AMBER looks like. A zone rollup and an individual centre are different grains of the same
+ * question, and they must not answer it in different colours.
+ *
+ * Note `NOT STARTED` carries a space in the panel data while `ZoneCost` uses `NOT_STARTED` — both
+ * are handled, because a colour silently falling through to "unknown" over a separator would be
+ * indistinguishable from real missing data.
+ */
+export function colorForCentreAlert(alertLevel: string | null | undefined): number {
+  switch ((alertLevel ?? "").trim().toUpperCase().replace(/_/g, " ")) {
+    case "AMBER": return WARN;
+    case "GREEN": return GOOD;
+    case "CLOSED": return GOOD;
+    case "NOT STARTED": return DORMANT;
+    default: return UNKNOWN;
+  }
+}
+
+/** Legend for painting individual elements by their own cost centre. */
+export function centreLegend(): LegendRow[] {
+  return [
+    { label: "Drifting", color: WARN, note: "this element's cost centre is AMBER" },
+    { label: "On budget", color: GOOD, note: "cost centre is GREEN or closed" },
+    { label: "Not started", color: DORMANT, note: "no work booked against it yet" },
+    { label: "No verdict", color: UNKNOWN, note: "cost centre carries no alert level" },
+  ];
+}
+
 export interface LegendRow {
   label: string;
   color: number;

@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import type * as FRAGS from "@thatopen/fragments";
-import type { ZoneCost } from "../api/client";
-import { colorFor, type PaintMode } from "./costPaint";
+import type { CostCentreEvm, ZoneCost } from "../api/client";
+import { colorFor, colorForCentreAlert, type PaintMode } from "./costPaint";
+import { centresFor, worstAlert, type ElementMapIndex } from "./ifcElementMap";
 import type { ZoneMapResult } from "./ifcZoneMap";
 import type { Viewer } from "./viewer";
 
@@ -104,6 +105,78 @@ export async function paintIfcByCost(
 
   // The world renders on demand, so a colour change is invisible until the renderer is asked to
   // draw again — the same reason the massing tab sets needsUpdate after a repaint.
+  await viewer.fragments.core.update(true);
+  return painted;
+}
+
+/**
+ * Paints each element by its own cost centre, rather than by the zone it falls in.
+ *
+ * <b>Why this supersedes the zone paint where the register exists.</b> A zone rollup answers "is
+ * this part of the building in trouble" over dozens of centres at once; the register answers it for
+ * the element under the cursor. On the bundled model that is the difference between three coloured
+ * regions and eight separately tracked cost centres, and it is the whole point of authoring the
+ * element→bill binding.
+ *
+ * Opacity carries the register's confidence, so a rebar bar placed by storey never looks as solid
+ * as a column placed by its own class.
+ *
+ * Returns how many elements were painted.
+ */
+export async function paintIfcByCostCentre(
+  viewer: Viewer,
+  model: FRAGS.FragmentsModel,
+  index: ElementMapIndex,
+  centres: readonly CostCentreEvm[],
+  mode: PaintMode,
+): Promise<number> {
+  const maxUnspent = centres.reduce((m, c) => Math.max(m, Math.max(0, c.bac - c.ac)), 0);
+
+  const byStyle = new Map<string, { color: number; opacity: number; ids: number[] }>();
+  const ghosts: number[] = [...index.unmappedLocalIds];
+  let painted = 0;
+
+  for (const localId of index.mappedLocalIds) {
+    const resolved = index.byLocalId.get(localId);
+    if (!resolved) continue;
+
+    const own = centresFor(resolved, centres);
+    if (own.length === 0) {
+      // Bound to a bill item, but that item's centre is not in this period's panel.
+      ghosts.push(localId);
+      continue;
+    }
+
+    let color: number;
+    if (mode === "exposure") {
+      // Ranked by the money still to be committed on the element's worst-off centre. A ranking
+      // signal, not an additive one — several elements share a centre and its unspent budget.
+      const unspent = Math.max(...own.map((c) => Math.max(0, c.bac - c.ac)));
+      const t = maxUnspent > 0 ? Math.min(1, unspent / maxUnspent) : 0;
+      color = new THREE.Color(0x22a56a).lerp(new THREE.Color(0xd99a1c), t).getHex();
+    } else {
+      color = colorForCentreAlert(worstAlert(own));
+    }
+
+    // The register's own confidence, not a link tier: 0.9 declared by class, 0.6 inferred by storey.
+    const opacity = resolved.element.confidence >= 0.9 ? 1 : 0.55;
+    const key = `${color}:${opacity}`;
+    const bucket = byStyle.get(key) ?? { color, opacity, ids: [] };
+    bucket.ids.push(localId);
+    byStyle.set(key, bucket);
+    painted++;
+  }
+
+  for (const { color, opacity, ids } of byStyle.values()) {
+    model.setColor(ids, new THREE.Color(color));
+    model.setOpacity(ids, opacity);
+  }
+
+  if (ghosts.length > 0) {
+    model.setColor(ghosts, new THREE.Color(UNPLACED));
+    model.setOpacity(ghosts, UNPLACED_OPACITY);
+  }
+
   await viewer.fragments.core.update(true);
   return painted;
 }
