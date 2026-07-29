@@ -248,8 +248,8 @@ category — but **not something to port**, because there is nothing there to po
 
 Scope: the surgical subset. All in the frontend, no backend or schema change.
 
-> **Status: Phases 1 and 2 are built and verified** (2026-07-29). Phase 3 remains deferred by
-> design. What the tab reports on the bundled model is recorded in §7.
+> **Status: Phases 1, 2 and 4 are built and verified** (2026-07-29). Phase 3 (persistence) remains
+> deferred by design. What the tab reports on the bundled model is recorded in §7.
 
 ### Step 0 — resolve the highlight API ✅ resolved
 
@@ -310,13 +310,23 @@ files. Not worth it for a hackathon, and the client-side path produces an identi
 Once this lands, the copilot can finally see model elements and `LocateCostRisk` can answer *"which
 elements"* rather than *"which zone."*
 
-### An idea neither team has built
+### Phase 4 — model quantity vs BOQ quantity ✅ built
 
-Both solutions measure model quantities, and **neither compares them to the BOQ.** We compute
-2,735.5 m³ of slab off the model; the BOQ priced some other number. That difference is a
-quantity-growth early warning available *before a single invoice is raised* — the earliest signal in
-the whole problem statement. Our `RateBook` + `TakeoffPricer` are already 90% of the machinery.
-Worth considering after Phase 2.
+An idea **neither team had built.** Both measure model quantities; neither compared them to the
+bill. Every other warning in this system is downstream of money — CPI moves once cost is booked, the
+variance bridge explains a gap that already exists. This one fires while the concrete is still a
+drawing.
+
+`RateItem.BoqQuantity` already existed (carried for context, never used), so the machinery was
+mostly there. Added `QuantityVariance` to `TakeoffPricer`, computed per **BOQ item** rather than per
+IFC class — anything pricing through one item is two parts of one number, and splitting them would
+report the same item as short twice.
+
+Two refusals are the substance of it:
+- An item whose BOQ quantity is missing or zero is **never compared**. Treating an absent quantity
+  as zero would turn every such item into a 100% overrun manufactured out of a gap in the bill.
+- The API never calls the result an overrun. `varianceBasis` states it is only a signal when the
+  loaded model *is* the project's model; against any other building it compares two unrelated bills.
 
 ---
 
@@ -328,8 +338,8 @@ package manager that resolves it.
 
 | Check | Result |
 |---|---|
-| `dotnet test` — main suite | **136 / 136 pass** |
-| `TakeoffPricingTests` + `SpatialCostMapTests` | **19 / 19 pass**, measured constants unchanged |
+| `dotnet test` — main suite | **143 / 143 pass** (136 before, +7 for Phase 4) |
+| `TakeoffPricingTests` | **15 / 15 pass**, measured constants unchanged |
 | `pnpm test` — new vitest suite | **14 / 14 pass** (6 zone-map, 8 cost-link) |
 | `pnpm build` | passes; `IfcTakeoff` still lazy-split (22.8 kB, viewer chunk separate) |
 | **IFC Take-off** in Chrome | model loads from local WASM, paints, scrubber recolours, legend shared with `ModelView` |
@@ -362,6 +372,19 @@ visually. That is the ceiling a QS should know about before trusting any model-d
 The storey regression the `ifcZoneMap` docblock records was also confirmed fixed **on real data**,
 not just in the unit test: the model does contain a `Sub Level`, and BASEMENT correctly receives
 **zero** slabs — all 299 are placed on the levels they actually sit on.
+
+### Quantity variance on the bundled model
+
+| BOQ item | Model | Bill | Variance | At this rate |
+|---|---|---|---|---|
+| 2.11 slab soffit formwork | 6,761.9 m² | 21,500 m² | −69% | −2,679,420 AED |
+| 2.06 suspended slab concrete | 2,735.5 m³ | 3,850 m³ | −29% | −1,251,168 AED |
+| 2.04 columns concrete | 112.3 m³ | 980 m³ | −89% | −1,183,726 AED |
+| 2.05 structural wall concrete | 127 m³ | 480 m³ | −74% | −515,195 AED |
+
+**Every line is negative, and that is the correct answer** — a 3-storey school is smaller than a
+9-storey tower on every item. It is a useful sanity check on the arithmetic and a demonstration of
+why the caveat is not decoration: on an unrelated model the comparison *should* diverge wildly.
 
 ---
 

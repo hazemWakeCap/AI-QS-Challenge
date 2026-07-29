@@ -28,6 +28,9 @@ import type * as FRAGS from "@thatopen/fragments";
 /** Share of a total, as a whole-number percentage. Returns a dash when there is nothing to divide. */
 const pct = (n: number, total: number) => (total > 0 ? `${((100 * n) / total).toFixed(0)}%` : DASH);
 
+/** A measured quantity, to one decimal — the precision a take-off is actually good to. */
+const qty = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 1 });
+
 export function IfcTakeoff({ period }: { period: number }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<Viewer | null>(null);
@@ -431,6 +434,76 @@ export function IfcTakeoff({ period }: { period: number }) {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {pricing && (pricing.quantityVariances.length > 0 || pricing.uncomparableQuantities.length > 0) && (
+          <div className="card">
+            <h3>Does the model agree with the bill?</h3>
+
+            <p className="note-warn">
+              <b>Read the mechanism, not the numbers below.</b> A school measured against Tower
+              X&apos;s bill of quantities is two unrelated buildings, so the divergence here is not
+              an overrun. On a project&apos;s <em>own</em> model this is the earliest warning in the
+              whole system: every other signal waits for cost to be booked, this one fires while the
+              concrete is still a drawing.
+            </p>
+
+            {pricing.quantityVariances.length > 0 && (
+              <div className="grid-scroll">
+                <table className="grid">
+                  <thead>
+                    <tr>
+                      <th>BOQ item</th>
+                      <th className="num">Model vs bill</th>
+                      <th className="num">Variance</th>
+                      <th className="num">At this rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pricing.quantityVariances.map((v) => (
+                      <tr key={v.boqItemRef}>
+                        <td>
+                          <div className="mono">{v.boqItemRef}</div>
+                          {v.boqDescription && (
+                            <div className="muted small">{v.boqDescription}</div>
+                          )}
+                        </td>
+                        <td className="num">
+                          {qty(v.modelQuantity)}
+                          <span className="muted"> / </span>
+                          {qty(v.boqQuantity)}
+                          <div className="muted small">{v.unit}</div>
+                        </td>
+                        <td className="num">
+                          <span className={v.variance > 0 ? "pill-warn" : ""}>
+                            {v.variance > 0 ? "+" : ""}
+                            {qty(v.variance)}
+                          </span>
+                          <div className="muted small">
+                            {v.variancePct > 0 ? "+" : ""}
+                            {(v.variancePct * 100).toFixed(0)}%
+                          </div>
+                        </td>
+                        <td className="num">{money(v.costImpact, pricing.currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {pricing.uncomparableQuantities.length > 0 && (
+              <p className="muted small">
+                Not compared:{" "}
+                {pricing.uncomparableQuantities.map((u) => u.boqItemRef).join(", ")} — the bill
+                carries no quantity for{" "}
+                {pricing.uncomparableQuantities.length === 1 ? "it" : "them"}, and treating a missing
+                quantity as zero would report a 100% overrun that only exists in the gap.
+              </p>
+            )}
+
+            <p className="muted small">{pricing.varianceBasis}</p>
           </div>
         )}
 

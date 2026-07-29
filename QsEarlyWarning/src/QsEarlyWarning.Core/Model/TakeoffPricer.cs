@@ -24,6 +24,37 @@ public sealed record UnpricedLine(
     string IfcClass, TakeoffMeasure Measure, double Quantity, int ElementCount, string Reason);
 
 /// <summary>
+/// What the model measures for a BOQ item, set against what that item was priced for.
+///
+/// <para><b>Why this is the earliest signal there is.</b> Every other overrun warning in this system
+/// is downstream of money: CPI moves once cost has been booked, and a variance bridge explains a gap
+/// that already exists. This one fires before a single invoice. If the model carries 2,900 m³ of
+/// slab and the BOQ priced 2,400 m³, the job is already 500 m³ over — the concrete has simply not
+/// been poured yet. A QS who sees that at design stage can still act on it.</para>
+///
+/// <para><b>It is only a signal when the model IS the project's model.</b> Measuring one building
+/// against another building's bill compares nothing, and the divergence it produces is not an
+/// overrun — it is two unrelated buildings. The API reports the comparison and lets the caller say
+/// which case it is; it never labels the result an overrun on its own authority.</para>
+/// </summary>
+/// <param name="Variance">Model − BOQ. Positive means the model carries more than was priced, which
+/// is the direction that costs money.</param>
+/// <param name="CostImpact">Variance priced at the item's own unit rate.</param>
+public sealed record QuantityVariance(
+    string BoqItemRef,
+    string? BoqDescription,
+    string Unit,
+    double ModelQuantity,
+    double BoqQuantity,
+    double Variance,
+    double VariancePct,
+    double UnitRate,
+    double CostImpact);
+
+/// <summary>A priced item the model could not be compared against, and why.</summary>
+public sealed record UncomparableQuantity(string BoqItemRef, string Reason);
+
+/// <summary>
 /// The result of pricing a model take-off against a rate library.
 ///
 /// <para><b>The residual is not an afterthought.</b> <see cref="PricedAmount"/> on its own is a
@@ -45,7 +76,9 @@ public sealed record TakeoffPricing(
     int UnpricedElements,
     int UnmeasuredElements,
     bool TiesOut,
-    IReadOnlyList<TakeoffRule> RulesApplied);
+    IReadOnlyList<TakeoffRule> RulesApplied,
+    IReadOnlyList<QuantityVariance> QuantityVariances,
+    IReadOnlyList<UncomparableQuantity> UncomparableQuantities);
 
 /// <summary>
 /// Prices a model take-off with the project's own rate library.
@@ -118,6 +151,7 @@ public static class TakeoffPricer
         }
 
         int accountedFor = pricedElements + unpricedElements + unmeasuredElements;
+        var (variances, uncomparable) = CompareToBoq(priced, rates);
 
         return new TakeoffPricing(
             currency,
@@ -126,7 +160,57 @@ public static class TakeoffPricer
             unpriced.OrderByDescending(u => u.ElementCount).ToList(),
             modelElementCount, pricedElements, unpricedElements, unmeasuredElements,
             TiesOut: accountedFor == modelElementCount,
-            TakeoffRateMap.Rules);
+            TakeoffRateMap.Rules,
+            variances,
+            uncomparable);
+    }
+
+    /// <summary>
+    /// Sets each BOQ item's measured quantity against the quantity it was priced for.
+    ///
+    /// <para>Grouped by BOQ item, not by IFC class: the bill is what the comparison is against, and
+    /// if two classes ever price through the same item their quantities are two parts of one number.
+    /// Comparing each class separately would report the same item as short twice.</para>
+    ///
+    /// <para>An item whose BOQ quantity is missing or zero is never compared. Treating an absent
+    /// quantity as zero would turn every such item into a 100% overrun — a confident number
+    /// manufactured out of a gap in the bill.</para>
+    /// </summary>
+    private static (List<QuantityVariance>, List<UncomparableQuantity>) CompareToBoq(
+        List<PricedLine> priced, RateBook rates)
+    {
+        var variances = new List<QuantityVariance>();
+        var uncomparable = new List<UncomparableQuantity>();
+
+        foreach (var group in priced.GroupBy(p => p.BoqItemRef, StringComparer.OrdinalIgnoreCase))
+        {
+            var rate = rates.Find(group.Key);
+            if (rate is null) continue;
+
+            if (rate.BoqQuantity is not { } boqQuantity || boqQuantity <= 0)
+            {
+                uncomparable.Add(new UncomparableQuantity(group.Key,
+                    $"BOQ item {group.Key} carries no quantity, so there is nothing to measure the model against."));
+                continue;
+            }
+
+            double modelQuantity = group.Sum(p => p.Quantity);
+            double variance = modelQuantity - boqQuantity;
+
+            variances.Add(new QuantityVariance(
+                group.Key,
+                rate.Description,
+                group.First().Unit,
+                Math.Round(modelQuantity, 2),
+                Math.Round(boqQuantity, 2),
+                Math.Round(variance, 2),
+                variance / boqQuantity,
+                rate.UnitRate,
+                Math.Round(variance * rate.UnitRate, 2)));
+        }
+
+        // Biggest money first — the order a QS would work the list in.
+        return (variances.OrderByDescending(v => Math.Abs(v.CostImpact)).ToList(), uncomparable);
     }
 
     /// <summary>Units agree when they normalise to the same token (m3/m³, m2/m², sqm, cum).</summary>

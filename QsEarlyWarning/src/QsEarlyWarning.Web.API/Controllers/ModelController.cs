@@ -152,7 +152,16 @@ public sealed class ModelController : ControllerBase
             result.RulesApplied.Select(r => new TakeoffRuleDto(
                 r.IfcClass, Label(r.Measure), r.Unit, r.BoqItemRef, r.Rationale)).ToList(),
             RateBasis: "Direct + indirect unit cost from this project's BOQ. Margin and contingency "
-                     + "are excluded — they are commercial positions taken per project, not transferable rates."));
+                     + "are excluded — they are commercial positions taken per project, not transferable rates.",
+            result.QuantityVariances.Select(v => new QuantityVarianceDto(
+                v.BoqItemRef, v.BoqDescription, v.Unit, v.ModelQuantity, v.BoqQuantity,
+                v.Variance, v.VariancePct, v.UnitRate, Math.Round((decimal)v.CostImpact, 2))).ToList(),
+            result.UncomparableQuantities.Select(u => new UncomparableQuantityDto(
+                u.BoqItemRef, u.Reason)).ToList(),
+            VarianceBasis: "Quantity measured off the loaded model against the quantity the BOQ item was "
+                         + "priced for, valued at that item's own unit rate. This is only an overrun signal "
+                         + "when the loaded model is this project's model; against any other building it "
+                         + "compares two unrelated bills of quantities."));
     }
 
     private static bool TryMeasure(string? value, out TakeoffMeasure measure)

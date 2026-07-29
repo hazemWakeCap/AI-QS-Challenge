@@ -146,7 +146,25 @@ public sealed record TakeoffPricingDto(
     int UnmeasuredElements,
     bool TiesOut,
     IReadOnlyList<TakeoffRuleDto> RulesApplied,
-    string RateBasis);
+    string RateBasis,
+    IReadOnlyList<QuantityVarianceDto> QuantityVariances,
+    IReadOnlyList<UncomparableQuantityDto> UncomparableQuantities,
+    string VarianceBasis);
+
+/// <summary>What the model measures for a BOQ item versus what that item was priced for.</summary>
+public sealed record QuantityVarianceDto(
+    string BoqItemRef,
+    string? BoqDescription,
+    string Unit,
+    double ModelQuantity,
+    double BoqQuantity,
+    double Variance,
+    double VariancePct,
+    double UnitRate,
+    decimal CostImpact);
+
+/// <summary>A priced item the model could not be compared against, and why.</summary>
+public sealed record UncomparableQuantityDto(string BoqItemRef, string Reason);
 
 /// <summary>The parametric massing spec plus the provenance table that justifies it.</summary>
 public sealed record GeometrySpecDto(

@@ -189,6 +189,33 @@ export interface TakeoffPricing {
   tiesOut: boolean;
   rulesApplied: TakeoffRule[];
   rateBasis: string;
+  quantityVariances: QuantityVariance[];
+  uncomparableQuantities: UncomparableQuantity[];
+  varianceBasis: string;
+}
+
+/**
+ * What the model measures for a BOQ item against what that item was priced for.
+ *
+ * Only an overrun signal when the loaded model is this project's model — against any other building
+ * it compares two unrelated bills. `varianceBasis` carries that caveat from the API.
+ */
+export interface QuantityVariance {
+  boqItemRef: string;
+  boqDescription: string | null;
+  unit: string;
+  modelQuantity: number;
+  boqQuantity: number;
+  /** Model − BOQ. Positive means the model carries more than was priced: the direction that costs. */
+  variance: number;
+  variancePct: number;
+  unitRate: number;
+  costImpact: number;
+}
+
+export interface UncomparableQuantity {
+  boqItemRef: string;
+  reason: string;
 }
 
 export const api = {
