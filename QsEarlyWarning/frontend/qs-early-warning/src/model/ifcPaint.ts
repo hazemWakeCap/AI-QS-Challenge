@@ -3,6 +3,7 @@ import type * as FRAGS from "@thatopen/fragments";
 import type { CostCentreEvm, ZoneCost } from "../api/client";
 import { colorFor, colorForCentreAlert, type PaintMode } from "./costPaint";
 import { centresFor, worstAlert, type ElementMapIndex } from "./ifcElementMap";
+import type { SequenceFrame } from "./ifcSequence";
 import type { ZoneMapResult } from "./ifcZoneMap";
 import type { Viewer } from "./viewer";
 
@@ -179,6 +180,93 @@ export async function paintIfcByCostCentre(
 
   await viewer.fragments.core.update(true);
   return painted;
+}
+
+/**
+ * Draws one frame of the construction sequence.
+ *
+ * Elements that have not been reached yet are hidden outright rather than ghosted, so the building
+ * genuinely rises instead of fading in — a half-transparent column reads as a design option, not as
+ * work that has not happened.
+ *
+ * Elements the bill prices nothing for never join the sequence. They stay as faint ghosts for the
+ * whole run, which is the scope gap made visual: 375 beams that never get built because no item
+ * ever paid for them.
+ */
+export async function paintSequenceFrame(
+  viewer: Viewer,
+  model: FRAGS.FragmentsModel,
+  index: ElementMapIndex,
+  frame: SequenceFrame,
+  previous: SequenceFrame | null,
+): Promise<void> {
+  // Only the difference is applied. Re-sending all ~1,100 elements every tick and forcing a full
+  // refresh saturates the main thread badly enough to freeze the renderer, and almost nothing
+  // changes between two frames a quarter of a period apart.
+  const appear = new Map<number, number>();   // localId → colour
+  const recolour = new Map<number, number>();
+  const vanish: number[] = [];
+
+  for (const localId of frame.built) {
+    const color = colorForCentreAlert(frame.alertByLocalId.get(localId));
+    if (!previous?.built.has(localId)) {
+      appear.set(localId, color);
+    } else if (colorForCentreAlert(previous.alertByLocalId.get(localId)) !== color) {
+      recolour.set(localId, color);
+    }
+  }
+
+  if (previous) {
+    for (const localId of previous.built) {
+      if (!frame.built.has(localId)) vanish.push(localId);
+    }
+  } else {
+    // First frame of a run: everything priced starts hidden, then this frame's share appears.
+    const hidden = index.mappedLocalIds.filter((id) => !frame.built.has(id));
+    if (hidden.length > 0) model.setVisible(hidden, false);
+
+    // Never priced, so never built — held on screen throughout as the scope with no money behind it.
+    if (index.unmappedLocalIds.length > 0) {
+      model.setVisible(index.unmappedLocalIds, true);
+      model.setColor(index.unmappedLocalIds, new THREE.Color(UNPLACED));
+      model.setOpacity(index.unmappedLocalIds, UNPLACED_OPACITY);
+    }
+  }
+
+  if (vanish.length > 0) model.setVisible(vanish, false);
+
+  const byColor = new Map<number, number[]>();
+  for (const [localId, color] of appear) (byColor.get(color) ?? byColor.set(color, []).get(color)!).push(localId);
+
+  for (const [color, ids] of byColor) {
+    model.setVisible(ids, true);
+    model.setColor(ids, new THREE.Color(color));
+    model.setOpacity(ids, 1);
+  }
+
+  const byRecolour = new Map<number, number[]>();
+  for (const [localId, color] of recolour)
+    (byRecolour.get(color) ?? byRecolour.set(color, []).get(color)!).push(localId);
+  for (const [color, ids] of byRecolour) model.setColor(ids, new THREE.Color(color));
+
+  if (appear.size === 0 && recolour.size === 0 && vanish.length === 0 && previous) return;
+
+  // `update(false)` rather than `update(true)`: a forced refresh re-evaluates the whole model and
+  // costs enough at this frame rate to stall the renderer, and the sequence only ever changes
+  // visibility and colour on geometry that is already resident.
+  await viewer.fragments.core.update(false);
+}
+
+/** Restores every element the sequence hid, so leaving playback does not leave a half-built model. */
+export async function showAllElements(
+  viewer: Viewer,
+  model: FRAGS.FragmentsModel,
+  index: ElementMapIndex,
+): Promise<void> {
+  const all = [...index.mappedLocalIds, ...index.unmappedLocalIds];
+  if (all.length === 0) return;
+  model.setVisible(all, true);
+  await viewer.fragments.core.update(true);
 }
 
 /** Drops every applied colour and opacity, returning the model to how the exporter shipped it. */

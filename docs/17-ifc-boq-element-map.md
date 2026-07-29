@@ -129,6 +129,57 @@ property of the supplied workbook, recorded because it will bite the next person
 
 ---
 
+---
+
+## The 4D build sequence
+
+Once elements reach cost centres, the sheet's progress curves can drive the model. The **▶ Build**
+control on the IFC Take-off tab plays periods 1→12: the structure rises by each centre's
+`Actual_Pct_Complete` while every element is coloured by that centre's alert level. Video:
+`presentation/tower-4d-build.mp4` (7s).
+
+### What is from the data
+
+- **The pace.** Real S-curves — 0% at P1 rising to 66–77% by P12, per cost centre.
+- **The colour.** Each element carries its own centre's alert. GREEN elements appear among the AMBER
+  around P8 because those centres genuinely recovered that month.
+- **What never gets built.** The 375 beams stay as grey ghosts for the whole run, because no bill
+  item ever paid for them. The scope gap is visible as structure that never fills in.
+
+### What is assumed — assumption 8
+
+**Which elements are built, and in what order.** `Actual_Pct_Complete` is per cost centre, never per
+element: a centre at 43% says nothing about which 43% of its 299 slabs are poured. The sequence
+therefore orders elements **by storey, bottom-up** (`Sub Level` → `01 - Entry Level` → `02` → `03` →
+`Roof`), then by GlobalId for a stable tie-break, and reveals the first *n* once the centre reaches
+*n / total*.
+
+That is what every 4D planning tool does and it is defensible for a concrete frame — but it is a
+sequence we chose. The on-screen caption says so on every frame: *"The order is assumed, the amounts
+are not."*
+
+Two smaller rules, both to avoid hiding trouble:
+- An element appears as soon as **any** of its centres reaches it — waiting for every trade would
+  make the building lag its own concrete.
+- An element shows the **worst** alert among its centres. A slab whose concrete is on budget and
+  whose formwork is drifting is a slab with a problem.
+
+### Regenerating the video
+
+Play the sequence (or scrub the slider, which steps in quarter-periods while a build is loaded),
+capture one frame per period, then:
+
+```bash
+ffmpeg -y -framerate 0.7 -i f%02d.jpg \
+  -vf "crop=700:640:186:62,scale=1200:-2,minterpolate=fps=30:mi_mode=blend,format=yuv420p" \
+  -c:v libx264 -crf 20 -movflags +faststart tower-4d-build.mp4
+```
+
+Frames must be captured in a real browser — headless Chromium has no WebGL here, so the viewer never
+initialises.
+
+---
+
 ## Regenerating
 
 ```bash

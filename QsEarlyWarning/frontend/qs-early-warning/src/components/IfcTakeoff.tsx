@@ -8,8 +8,11 @@ import { buildCostLinks, TIER_CONFIDENCE, type CostLinkResult } from "../model/i
 import { buildElementIndex, type ElementMapIndex, type ResolvedElement } from "../model/ifcElementMap";
 import { fetchBundledIfc, loadIfc, readIfcFile } from "../model/ifcLoader";
 import { measureModel, type ModelMeasurement } from "../model/ifcMeasure";
-import { paintIfcByCost, paintIfcByCostCentre, unplacedLegend } from "../model/ifcPaint";
+import {
+  paintIfcByCost, paintIfcByCostCentre, paintSequenceFrame, showAllElements, unplacedLegend,
+} from "../model/ifcPaint";
 import { elementAtPointer, showSelection } from "../model/ifcPick";
+import { buildSequence, frameAt, type BuildSequence, type SequenceFrame } from "../model/ifcSequence";
 import { mapToZones, type ZoneMapResult } from "../model/ifcZoneMap";
 import { createViewer, fitToBounds, type Viewer } from "../model/viewer";
 import { Spinner } from "./Loading";
@@ -63,6 +66,16 @@ export function IfcTakeoff({
   const [index, setIndex] = useState<ElementMapIndex | null>(null);
   const [centres, setCentres] = useState<CostCentreEvm[]>([]);
   const [selected, setSelected] = useState<ResolvedElement | null>(null);
+
+  // ── 4D playback ──
+  // `playT` is a fractional period so the building rises continuously rather than jumping monthly.
+  const [sequence, setSequence] = useState<BuildSequence | null>(null);
+  const [centresByPeriod, setCentresByPeriod] = useState<Map<number, CostCentreEvm[]> | null>(null);
+  const [playT, setPlayT] = useState<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [builtCount, setBuiltCount] = useState(0);
+  /** Last drawn frame, so each tick only applies what actually changed. */
+  const prevFrameRef = useRef<SequenceFrame | null>(null);
   // Tower X's cost map, used only to report which of ITS zones this model reaches — never to
   // suggest the loaded building shares that budget.
   const [costMap, setCostMap] = useState<CostMap | null>(null);
@@ -239,6 +252,71 @@ export function IfcTakeoff({
     return () => { cancelled = true; };
   }, [measurement]);
 
+  // ── 4D: the build order, and every period's progress ──
+  // Fetched once per model. The sequence is deterministic, so a video rendered twice is identical.
+  useEffect(() => {
+    if (!index || !costMap) return;
+
+    let cancelled = false;
+    (async () => {
+      const periods: number[] = [];
+      for (let p = costMap.minPeriod; p <= costMap.maxPeriod; p++) periods.push(p);
+
+      const rows = await Promise.all(
+        periods.map((p): Promise<[number, CostCentreEvm[]]> =>
+          api.costCentres(p).then((r) => [p, r] as [number, CostCentreEvm[]])
+            .catch(() => [p, []] as [number, CostCentreEvm[]])),
+      );
+      if (cancelled) return;
+
+      setCentresByPeriod(new Map(rows));
+      setSequence(buildSequence(index));
+    })();
+
+    return () => { cancelled = true; };
+  }, [index, costMap?.minPeriod, costMap?.maxPeriod]);
+
+  // Advance the clock while playing.
+  //
+  // Keyed on `playing` alone and reading the ceiling from a ref: an earlier version listed derived
+  // values in the dependency array, and every re-render that changed one of them tore the interval
+  // down mid-run, so playback stalled a few frames in and looked like a performance problem rather
+  // than a lifecycle one.
+  const maxPeriodRef = useRef(12);
+  useEffect(() => {
+    if (costMap) maxPeriodRef.current = costMap.maxPeriod;
+  }, [costMap]);
+
+  useEffect(() => {
+    if (!playing) return;
+    const id = window.setInterval(() => {
+      setPlayT((t) => {
+        if (t === null) return t;
+        const next = +(t + 0.25).toFixed(2);
+        if (next >= maxPeriodRef.current) return maxPeriodRef.current;
+        return next;
+      });
+    }, 120);
+    return () => window.clearInterval(id);
+  }, [playing]);
+
+  // Stop at the end. Done as an effect rather than inside the state updater, which must stay pure.
+  useEffect(() => {
+    if (playing && playT !== null && playT >= maxPeriodRef.current) setPlaying(false);
+  }, [playing, playT]);
+
+  // Draw the current frame of the sequence.
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    const model = modelRef.current;
+    if (!viewer || !model || !index || !sequence || !centresByPeriod || playT === null) return;
+
+    const frame = frameAt(playT, sequence, centresByPeriod);
+    setBuiltCount(frame.builtCount);
+    void paintSequenceFrame(viewer, model, index, frame, prevFrameRef.current);
+    prevFrameRef.current = frame;
+  }, [playT, sequence, centresByPeriod, index]);
+
   // ── locate in the cost plan, then paint ──
   // Re-runs on a new model, a period scrub, or a mode switch. It never touches the viewer
   // lifecycle, so scrubbing recolours the model already on screen rather than reloading it.
@@ -246,6 +324,8 @@ export function IfcTakeoff({
     const viewer = viewerRef.current;
     const model = modelRef.current;
     if (!viewer || !model || !measurement) return;
+    // Playback owns the model while it is running; the static paint would fight it for colour.
+    if (playT !== null) return;
 
     let cancelled = false;
 
@@ -301,7 +381,7 @@ export function IfcTakeoff({
     return () => {
       cancelled = true;
     };
-  }, [measurement, viewPeriod, paintMode, index]);
+  }, [measurement, viewPeriod, paintMode, index, playT]);
 
   const onPick = async (file: File | undefined) => {
     if (!file) return;
@@ -322,16 +402,27 @@ export function IfcTakeoff({
           {costMap && (
             <div className="scrub">
               <label htmlFor="takeoff-period" className="muted small">Period</label>
+              {/* While a build sequence is loaded the slider scrubs the sequence itself, in quarter
+                  periods, so the construction can be stepped by hand as well as played. */}
               <input
                 id="takeoff-period"
                 type="range"
                 min={costMap.minPeriod}
                 max={costMap.maxPeriod}
-                value={viewPeriod}
-                onChange={(e) => setViewPeriod(Number(e.target.value))}
-                aria-label={`Reporting period ${viewPeriod}`}
+                step={playT !== null ? 0.25 : 1}
+                value={playT ?? viewPeriod}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (playT !== null) {
+                    setPlaying(false);
+                    setPlayT(v);
+                  } else {
+                    setViewPeriod(v);
+                  }
+                }}
+                aria-label={`Reporting period ${playT ?? viewPeriod}`}
               />
-              <span className="mono small">{viewPeriod}</span>
+              <span className="mono small">{playT ?? viewPeriod}</span>
             </div>
           )}
 
@@ -349,6 +440,40 @@ export function IfcTakeoff({
               Unspent exposure
             </button>
           </div>
+
+          {sequence && centresByPeriod && costMap && (
+            <div className="seg">
+              <button
+                className={`btn sm ${playT !== null ? "primary" : "ghost"}`}
+                onClick={() => {
+                  if (playT === null) {
+                    prevFrameRef.current = null; // first frame hides everything, then builds up
+                    setPlayT(costMap.minPeriod);
+                    setPlaying(true);
+                  } else {
+                    setPlaying((p) => !p);
+                  }
+                }}
+              >
+                {playT === null ? "▶ Build" : playing ? "❚❚ Pause" : "▶ Resume"}
+              </button>
+              {playT !== null && (
+                <button
+                  className="btn sm ghost"
+                  onClick={() => {
+                    setPlaying(false);
+                    setPlayT(null);
+                    prevFrameRef.current = null;
+                    const viewer = viewerRef.current;
+                    const model = modelRef.current;
+                    if (viewer && model && index) void showAllElements(viewer, model, index);
+                  }}
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          )}
 
           <label className="btn secondary sm file-pick">
             Load another IFC
@@ -369,6 +494,17 @@ export function IfcTakeoff({
             </div>
           )}
         </div>
+
+        {playT !== null && (
+          <p className="provenance-badge" data-sequence-readout>
+            <b>Period {Math.floor(playT)}</b> · {builtCount.toLocaleString()} of{" "}
+            {index?.mappedLocalIds.length.toLocaleString()} priced elements standing · coloured by
+            each element&apos;s own cost centre.{" "}
+            <b>The order is assumed, the amounts are not:</b> the sheet records percent complete per
+            cost centre, never per element, so elements rise bottom-up within their trade while the
+            pace and the colour come from the workbook.
+          </p>
+        )}
 
         {zoneMap && (
           <div className="model-legend">
