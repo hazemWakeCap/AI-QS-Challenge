@@ -440,13 +440,13 @@ export function IfcTakeoff({
 
           <div className="seg">
             <button
-              className={`btn sm ${paintMode === "cpi" ? "primary" : "ghost"}`}
+              className={`btn btn-sm ${paintMode === "cpi" ? "btn-primary" : "btn-ghost"}`}
               onClick={() => setPaintMode("cpi")}
             >
               Cost performance
             </button>
             <button
-              className={`btn sm ${paintMode === "exposure" ? "primary" : "ghost"}`}
+              className={`btn btn-sm ${paintMode === "exposure" ? "btn-primary" : "btn-ghost"}`}
               onClick={() => setPaintMode("exposure")}
             >
               Unspent exposure
@@ -456,7 +456,7 @@ export function IfcTakeoff({
           {sequence && centresByPeriod && costMap && (
             <div className="seg">
               <button
-                className={`btn sm ${playT !== null ? "primary" : "ghost"}`}
+                className={`btn btn-sm ${playT !== null ? "btn-primary" : "btn-ghost"}`}
                 onClick={() => {
                   if (playT === null) {
                     prevFrameRef.current = null; // first frame hides everything, then builds up
@@ -475,7 +475,7 @@ export function IfcTakeoff({
               </button>
               {playT !== null && (
                 <button
-                  className="btn sm ghost"
+                  className="btn btn-sm btn-ghost"
                   onClick={() => {
                     setPlaying(false);
                     setPlayT(null);
@@ -491,7 +491,7 @@ export function IfcTakeoff({
             </div>
           )}
 
-          <label className="btn secondary sm file-pick">
+          <label className="btn btn-sm btn-secondary file-pick">
             Load another IFC
             <input
               type="file"
@@ -546,7 +546,7 @@ export function IfcTakeoff({
           what is being demonstrated is that a rate library and a cost plan travel to any model you
           can measure. A colour here means &ldquo;an element of this kind maps to a zone in that
           state&rdquo;, never that this building holds that budget.{" "}
-          <button className="btn ghost sm" onClick={() => setShowRules((s) => !s)}>
+          <button className="btn btn-sm btn-ghost" onClick={() => setShowRules((s) => !s)}>
             {showRules ? "Hide pricing rules" : "Show pricing rules"}
           </button>
         </p>
@@ -648,7 +648,7 @@ export function IfcTakeoff({
                                 </div>
                               </div>
                               <button
-                                className="btn primary sm"
+                                className="btn btn-sm btn-primary"
                                 onClick={() => onSelectCentre?.(centre, viewPeriod)}
                               >
                                 Open {centre.bccId}

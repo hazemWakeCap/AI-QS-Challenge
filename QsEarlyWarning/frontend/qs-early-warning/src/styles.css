@@ -8,6 +8,11 @@
   --border-soft: rgba(125, 140, 170, .28);
   --text: #16203a;
   --muted: #5a6884;
+  /* Ink tiers for the render stage. These were referenced by the .render-* rules before they
+     existed, so the video's title, readout and caption all drew at full strength. */
+  --ink: var(--text);
+  --ink-soft: var(--muted);
+  --ink-faint: #8a97b1;
 
   --accent: #2f6fe0;
   --accent-weak: rgba(47, 111, 224, .12);
@@ -519,7 +524,7 @@ tr.selected td { background: var(--accent-weak); box-shadow: inset 3px 0 0 var(-
 .render-stage {
   position: relative; overflow: hidden;
   background: linear-gradient(160deg, #f7f9fc 0%, #eef2f8 100%);
-  font-family: var(--font-sans);
+  font-family: var(--font-ui);
 }
 .render-canvas { position: absolute; inset: 0; }
 .render-canvas canvas { width: 100% !important; height: 100% !important; }
@@ -545,3 +550,16 @@ tr.selected td { background: var(--accent-weak); box-shadow: inset 3px 0 0 var(-
 
 .render-error { position: absolute; inset: 0; display: grid; place-items: center;
   color: var(--bad); font-size: 16px; padding: 40px; text-align: center; }
+
+/* ── Build Video tab ──
+   The stage renders at a fixed 1600x900 whatever it is displayed at, so the recording is identical
+   regardless of window size; the preview is scaled down to fit the card. */
+.buildvideo { display: flex; flex-direction: column; gap: var(--sp-4); }
+.buildvideo-controls { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.buildvideo-stage { position: relative; width: 100%; overflow: hidden;
+  border-radius: var(--r-md); border: 1px solid var(--border-soft);
+  /* 16:9, so the scaled stage has somewhere to sit without the card jumping as it loads. */
+  aspect-ratio: 16 / 9; }
+.buildvideo-player video { width: 100%; border-radius: var(--r-md);
+  border: 1px solid var(--border-soft); background: #000; display: block; }
+.buildvideo-player h3 { margin: 0 0 var(--sp-2); }

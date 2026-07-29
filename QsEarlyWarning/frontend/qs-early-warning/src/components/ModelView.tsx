@@ -182,13 +182,13 @@ export function ModelView({
           </div>
           <div className="seg">
             <button
-              className={`btn sm ${mode === "cpi" ? "primary" : "ghost"}`}
+              className={`btn btn-sm ${mode === "cpi" ? "btn-primary" : "btn-ghost"}`}
               onClick={() => setMode("cpi")}
             >
               Cost performance
             </button>
             <button
-              className={`btn sm ${mode === "exposure" ? "primary" : "ghost"}`}
+              className={`btn btn-sm ${mode === "exposure" ? "btn-primary" : "btn-ghost"}`}
               onClick={() => setMode("exposure")}
             >
               Unspent exposure
@@ -218,7 +218,7 @@ export function ModelView({
           generated from the bill of quantities — every dimension traces to a priced BOQ line. Each
           cost zone is drawn as its own region so it stays visible; this is a schematic of where the
           money sits, not a section through the building.{" "}
-          <button className="btn ghost sm" onClick={() => setShowProvenance((s) => !s)}>
+          <button className="btn btn-sm btn-ghost" onClick={() => setShowProvenance((s) => !s)}>
             {showProvenance ? "Hide derivation" : "Show derivation"}
           </button>
         </p>

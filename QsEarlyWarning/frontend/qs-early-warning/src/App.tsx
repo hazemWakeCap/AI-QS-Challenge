@@ -20,6 +20,7 @@ import { Drawer } from "./components/Drawer";
 // exactly where it was before this feature existed.
 const ModelView = lazy(() => import("./components/ModelView").then((m) => ({ default: m.ModelView })));
 const IfcTakeoff = lazy(() => import("./components/IfcTakeoff").then((m) => ({ default: m.IfcTakeoff })));
+const BuildVideo = lazy(() => import("./components/BuildVideo").then((m) => ({ default: m.BuildVideo })));
 // Reached only at /?render=1, by the video exporter. Lazy for the same reason as the tabs above:
 // nobody loading the product should pay for a surface only a renderer opens.
 const RenderHarness = lazy(() =>
@@ -27,13 +28,14 @@ const RenderHarness = lazy(() =>
 import { ProjectsAdmin } from "./components/ProjectsAdmin";
 import { EmptyState, Spinner } from "./components/Loading";
 
-type Tab = "copilot" | "overview" | "centres" | "model" | "ifc" | "capture" | "workflow" | "data" | "watchlist" | "proof" | "forecast" | "stress" | "validation" | "projects";
+type Tab = "copilot" | "overview" | "centres" | "model" | "ifc" | "video" | "capture" | "workflow" | "data" | "watchlist" | "proof" | "forecast" | "stress" | "validation" | "projects";
 const TABS: { id: Tab; label: string; featured?: boolean }[] = [
   { id: "copilot", label: "AI Assistant", featured: true },
   { id: "overview", label: "EVM Overview" },
   { id: "centres", label: "Cost Centres" },
   { id: "model", label: "3D Cost X-Ray" },
   { id: "ifc", label: "IFC Take-off" },
+  { id: "video", label: "Build Video" },
   { id: "capture", label: "Monthly Capture" },
   { id: "workflow", label: "Periods & Estimate" },
   { id: "data", label: "Data Admin" },
@@ -185,6 +187,11 @@ function Dashboard() {
               <Suspense fallback={<section className="card"><Spinner /></section>}>
                 <IfcTakeoff period={period}
                             onSelectCentre={(c, p) => { setSelectedCentre(c); setDrawerPeriod(p); }} />
+              </Suspense>
+            )}
+            {tab === "video" && (
+              <Suspense fallback={<section className="card"><Spinner /></section>}>
+                <section className="card"><BuildVideo /></section>
               </Suspense>
             )}
             {/* Shared cost-centre inspector: opened from the grid AND from a zone in the 3D view,

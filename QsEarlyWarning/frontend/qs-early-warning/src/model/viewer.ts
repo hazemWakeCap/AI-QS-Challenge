@@ -21,14 +21,24 @@ export interface Viewer {
  * Everything here is the documented setup path: Components → Worlds → scene/renderer/camera →
  * init → FragmentsManager. The one deviation is the locally bundled worker above.
  */
-export async function createViewer(container: HTMLElement): Promise<Viewer> {
+export async function createViewer(
+  container: HTMLElement,
+  /**
+   * Extra WebGL context options.
+   *
+   * The only caller that passes anything is the video stage, which needs
+   * `preserveDrawingBuffer: true` so the canvas can still be read after the compositor has run.
+   * It costs a driver optimisation, so nothing else asks for it.
+   */
+  rendererParams?: Partial<THREE.WebGLRendererParameters>,
+): Promise<Viewer> {
   const components = new OBC.Components();
 
   const worlds = components.get(OBC.Worlds);
   const world = worlds.create<OBC.SimpleScene, OBC.OrthoPerspectiveCamera, OBC.SimpleRenderer>();
 
   world.scene = new OBC.SimpleScene(components);
-  world.renderer = new OBC.SimpleRenderer(components, container);
+  world.renderer = new OBC.SimpleRenderer(components, container, rendererParams);
   world.camera = new OBC.OrthoPerspectiveCamera(components);
 
   components.init();
