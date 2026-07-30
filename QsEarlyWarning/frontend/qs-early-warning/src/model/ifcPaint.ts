@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import * as FRAGS from "@thatopen/fragments";
 import type { CostCentreEvm, ZoneCost } from "../api/client";
-import { colorFor, colorForCentreAlert, type PaintMode } from "./costPaint";
+import { colorFor, colorForCentreAlert } from "./costPaint";
 import { centresFor, worstAlert, type ElementMapIndex } from "./ifcElementMap";
 import type { SequenceFrame } from "./ifcSequence";
 import type { ZoneMapResult } from "./ifcZoneMap";
@@ -54,6 +54,10 @@ export interface IfcPaintPlan {
 /**
  * Colours every placed element by its zone's cost, and ghosts the rest.
  *
+ * The degradation path: only reached when the element register could not be resolved against the
+ * model, where a zone is the finest grain available. Cost performance is the only scale here —
+ * ranking by unspent money is a question for the X-Ray tab, whose whole subject is zones.
+ *
  * Returns the number of elements actually painted, which is not the same as the number matched: an
  * element in a zone the cost map never mentions has no cost to show, and is ghosted rather than
  * given a colour the data did not earn.
@@ -63,10 +67,8 @@ export async function paintIfcByCost(
   model: FRAGS.FragmentsModel,
   zoneMap: ZoneMapResult,
   zones: readonly ZoneCost[],
-  mode: PaintMode,
   plan: IfcPaintPlan = {},
 ): Promise<number> {
-  const maxUnspent = zones.reduce((m, z) => Math.max(m, z.unspent), 0);
   const costByZone = new Map(zones.map((z) => [z.zoneCode, z]));
 
   // Group by (colour, opacity) so the model takes a handful of batched calls rather than one per
@@ -83,7 +85,7 @@ export async function paintIfcByCost(
       continue;
     }
 
-    const color = colorFor(zone, mode, maxUnspent);
+    const color = colorFor(zone, "cpi", 0);
     for (const id of match.localIds) {
       const opacity = TIER_OPACITY[plan.tierByLocalId?.get(id) ?? "Grouped"];
       const key = `${color}:${opacity}`;
@@ -122,6 +124,11 @@ export async function paintIfcByCost(
  * Opacity carries the register's confidence, so a rebar bar placed by storey never looks as solid
  * as a column placed by its own class.
  *
+ * <b>Cost performance is the only scale.</b> There was an alternative here that ramped elements by
+ * unspent budget, and it was removed: it existed to see through the dilution a zone rollup causes,
+ * and this function has no rollup to see through — it reads each element's own centre. "Which of my
+ * centres has the most left to spend" is a sortable column on a table, not a colour on a building.
+ *
  * Returns how many elements were painted.
  */
 export async function paintIfcByCostCentre(
@@ -129,10 +136,7 @@ export async function paintIfcByCostCentre(
   model: FRAGS.FragmentsModel,
   index: ElementMapIndex,
   centres: readonly CostCentreEvm[],
-  mode: PaintMode,
 ): Promise<number> {
-  const maxUnspent = centres.reduce((m, c) => Math.max(m, Math.max(0, c.bac - c.ac)), 0);
-
   const byStyle = new Map<string, { color: number; opacity: number; ids: number[] }>();
   const ghosts: number[] = [...index.unmappedLocalIds];
   let painted = 0;
@@ -148,16 +152,8 @@ export async function paintIfcByCostCentre(
       continue;
     }
 
-    let color: number;
-    if (mode === "exposure") {
-      // Ranked by the money still to be committed on the element's worst-off centre. A ranking
-      // signal, not an additive one — several elements share a centre and its unspent budget.
-      const unspent = Math.max(...own.map((c) => Math.max(0, c.bac - c.ac)));
-      const t = maxUnspent > 0 ? Math.min(1, unspent / maxUnspent) : 0;
-      color = new THREE.Color(0x22a56a).lerp(new THREE.Color(0xd99a1c), t).getHex();
-    } else {
-      color = colorForCentreAlert(worstAlert(own));
-    }
+    // Worst wins across the element's centres, matching the sequence painter.
+    const color = colorForCentreAlert(worstAlert(own));
 
     // The register's own confidence, not a link tier: 0.9 declared by class, 0.6 inferred by storey.
     const opacity = resolved.element.confidence >= 0.9 ? 1 : 0.55;

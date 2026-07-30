@@ -3,10 +3,10 @@ import {
   api, type CostCentreEvm, type CostMap, type TakeoffLineRequest, type TakeoffPricing,
 } from "../api/client";
 import { money, millions, ratio, DASH } from "../format";
-import { centreLegend, forecastLegend, hex, legendFor, type PaintMode } from "../model/costPaint";
+import { centreLegend, forecastLegend, hex } from "../model/costPaint";
 import { buildCostLinks, TIER_CONFIDENCE, type CostLinkResult } from "../model/ifcCostLink";
 import { buildElementIndex, type ElementMapIndex, type ResolvedElement } from "../model/ifcElementMap";
-import { fetchBundledIfc, loadIfc, readIfcFile } from "../model/ifcLoader";
+import { fetchBundledIfc, loadIfc } from "../model/ifcLoader";
 import { measureModel, type ModelMeasurement } from "../model/ifcMeasure";
 import {
   paintIfcByCost, paintIfcByCostCentre, paintSequenceFrame, showAllElements, unplacedLegend,
@@ -44,6 +44,20 @@ const qty = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 
 /** Where a period sits along a slider track, as a percentage — used to band the track by tier. */
 const pctOf = (value: number, min: number, max: number) =>
   max > min ? (100 * (value - min)) / (max - min) : 100;
+
+/**
+ * The four questions the evidence panels answer, one shown at a time.
+ *
+ * Stacked, they ran to 4,600px — seven screens of scrolling, and the model itself left the viewport
+ * after the first one, which is the opposite of what a 3D tab is for. They are grouped rather than
+ * merely collapsed because they are not one list: each is a different question about whether the
+ * take-off can be trusted, and a QS asks one of them at a time.
+ *
+ * Every tab carries its own headline figure, so the numbers that matter stay legible without
+ * switching. Hiding "375 unpriced" behind a click would be exactly the kind of quiet omission this
+ * tab exists to prevent.
+ */
+type SidePanel = "priced" | "bill" | "measurable" | "plan";
 
 export function IfcTakeoff({
   period,
@@ -98,13 +112,13 @@ export function IfcTakeoff({
   // suggest the loaded building shares that budget.
   const [costMap, setCostMap] = useState<CostMap | null>(null);
   const [showRules, setShowRules] = useState(false);
+  const [sidePanel, setSidePanel] = useState<SidePanel>("priced");
 
   /** Period shown in this tab. Seeded from the app selector, then scrubbable in place. */
   const [viewPeriod, setViewPeriod] = useState(period);
   useEffect(() => setViewPeriod(period), [period]);
-  const [paintMode, setPaintMode] = useState<PaintMode>("cpi");
 
-  /** Load → measure → price. One path, whether the bytes came from the bundle or a file picker. */
+  /** Load → measure → price. */
   const ingest = useCallback(async (bytes: Uint8Array, name: string) => {
     const viewer = viewerRef.current;
     if (!viewer) return;
@@ -344,13 +358,23 @@ export function IfcTakeoff({
     if (playing && playT !== null && playT >= maxPeriodRef.current) setPlaying(false);
   }, [playing, playT]);
 
-  // Draw the current frame of the sequence.
-  //
-  // Also owns the static view past the last reported period: `api.costCentres` has no rows to serve
-  // there, and "what stands at period 18" is the only rendering that means anything anyway. So the
-  // sequence painter runs for any period past the origin, whether or not playback is running.
-  const staticT = progress && viewPeriod > progress.originPeriod ? viewPeriod : null;
-  const drawT = playT ?? staticT;
+  /**
+   * The period the model is drawn at, and the one thing the slider means.
+   *
+   * <b>The slider and ▶ Build render identically.</b> Both ask "what stands at period N, and what
+   * does it read as" — playback is an auto-scrub of the same frames, nothing more. An earlier version
+   * had the slider recolour a permanently-complete building while only ▶ Build made it rise, and the
+   * seam showed the moment the projection arrived: stepping from period 12 to 13 took the model from
+   * all 1,127 elements down to 887, so the building shrank while moving forward in time. One meaning
+   * for the slider is what removes that.
+   *
+   * The cost of it, stated: there is no longer a view of the whole scope coloured at an early period.
+   * At period 5 you see the ~30% that is built, not the full school. The side panels carry the
+   * full-scope cost picture, which is the better place for it — a table can show you all 173 centres
+   * at once and a building cannot.
+   */
+  const sequenceReady = Boolean(index && sequence && centresByPeriod);
+  const drawT = playT ?? (sequenceReady ? viewPeriod : null);
 
   /** Slider ceiling: the projection's horizon when there is one, else the last reported period. */
   const sliderMax = progress?.horizonPeriod ?? costMap?.maxPeriod ?? 12;
@@ -388,8 +412,8 @@ export function IfcTakeoff({
       .catch(() => { /* a dropped frame must not poison the chain */ });
   }, [drawT, sequence, centresByPeriod, index, progress]);
 
-  // Leaving the projected range restores the model, so scrubbing back to a reported period does not
-  // strand the building half-built under a static paint that never runs.
+  // Losing the sequence restores the model, so a reload cannot strand the building half-built under
+  // a zone paint that knows nothing about which elements the last frame had hidden.
   useEffect(() => {
     if (drawT !== null) return;
     const viewer = viewerRef.current;
@@ -399,16 +423,16 @@ export function IfcTakeoff({
     void showAllElements(viewer, model, index);
   }, [drawT, index]);
 
-  // ── locate in the cost plan, then paint ──
-  // Re-runs on a new model, a period scrub, or a mode switch. It never touches the viewer
-  // lifecycle, so scrubbing recolours the model already on screen rather than reloading it.
+  // ── locate in the cost plan ──
+  //
+  // Deliberately separate from painting. The side panels — the selected element's CPI and EV/AC, the
+  // zone match rate, the measurability report — are read from this data, so it has to follow the
+  // scrub whether or not the sequence painter is the one drawing. Folding the two together meant
+  // that once the sequence took over the model, every figure on the right froze at whatever period
+  // happened to be showing when it did.
   useEffect(() => {
-    const viewer = viewerRef.current;
     const model = modelRef.current;
-    if (!viewer || !model || !measurement) return;
-    // The sequence painter owns the model whenever it is drawing — during playback, and for any
-    // period past the origin. The static paint would fight it for colour.
-    if (drawT !== null) return;
+    if (!model || !measurement) return;
 
     let cancelled = false;
 
@@ -432,23 +456,42 @@ export function IfcTakeoff({
         if (cancelled) return;
         setZoneMap(zm);
 
-        const linked = buildCostLinks(measurement, zm, {
+        setLinks(buildCostLinks(measurement, zm, {
           zoneCodes: zones.map((z) => z.zoneCode),
           // Both identifiers a cost centre is known by — an element naming either one was authored
           // with this cost plan in view, even when it names no zone we could paint it into.
           centreCodes: evm.flatMap((c) => [c.bccId, c.packageCode]).filter(Boolean),
-        });
-        if (cancelled) return;
-        setLinks(linked);
+        }));
+      } catch (e) {
+        if (!cancelled) setErr(String((e as Error).message ?? e));
+      }
+    })();
 
-        // The register is the finer instrument: it colours each element by its own cost centre,
-        // where the zone map can only colour the region the element falls in. Prefer it, and fall
-        // back to zones when no register resolved.
+    return () => {
+      cancelled = true;
+    };
+  }, [measurement, dataPeriod]);
+
+  // ── paint, when the sequence is not the one doing it ──
+  //
+  // The degradation path. With a register resolved the sequence painter owns the model at every
+  // period, so this runs only before the register lands, or if it never does — in which case there
+  // is no per-element progress to sequence and colouring the whole model by zone is the best the
+  // data supports.
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    const model = modelRef.current;
+    if (!viewer || !model || !zoneMap || !links || drawT !== null) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
         if (index) {
-          await paintIfcByCostCentre(viewer, model, index, evm, paintMode);
+          await paintIfcByCostCentre(viewer, model, index, centres);
         } else {
-          await paintIfcByCost(viewer, model, zm, zones, paintMode, {
-            tierByLocalId: linked.tierByLocalId,
+          await paintIfcByCost(viewer, model, zoneMap, costMap?.zones ?? [], {
+            tierByLocalId: links.tierByLocalId,
           });
         }
 
@@ -464,12 +507,7 @@ export function IfcTakeoff({
     return () => {
       cancelled = true;
     };
-  }, [measurement, viewPeriod, paintMode, index, drawT, progress]);
-
-  const onPick = async (file: File | undefined) => {
-    if (!file) return;
-    await ingest(await readIfcFile(file), file.name);
-  };
+  }, [zoneMap, links, centres, costMap, index, drawT]);
 
   const report = measurement?.report;
   const coverage = report && report.totalElements > 0
@@ -487,6 +525,38 @@ export function IfcTakeoff({
     const h = Math.round(playT ?? viewPeriod) - progress.originPeriod;
     return progress.accuracy.find((m) => m.predictor === "pace" && m.horizon === h)?.maePp ?? null;
   })();
+  /**
+   * The evidence tabs, each labelled with the figure it is really about.
+   *
+   * The hint is the point: a tab reading "Priced · 375 unpriced" tells a QS there is scope with no
+   * money behind it before they click anything, so grouping the panels costs no visibility of the
+   * numbers that matter.
+   */
+  const evidencePanels: { key: SidePanel; label: string; hint: string | null }[] = [
+    {
+      key: "priced",
+      label: "Priced",
+      hint: pricing ? `${pricing.unpricedElements} unpriced` : null,
+    },
+    {
+      key: "bill",
+      label: "Bill check",
+      hint: pricing
+        ? `${pricing.quantityVariances.length + pricing.uncomparableQuantities.length} lines`
+        : null,
+    },
+    {
+      key: "measurable",
+      label: "Measurable",
+      hint: coverage == null ? null : `${coverage.toFixed(0)}%`,
+    },
+    {
+      key: "plan",
+      label: "Cost plan",
+      hint: zoneMap ? `${(zoneMap.matchRate * 100).toFixed(0)}% placed` : null,
+    },
+  ];
+
   /** Longest measured horizon, for the extrapolated caption's "no measurement past here" claim. */
   const lastMeasuredHorizon = progress
     ? Math.max(0, ...progress.accuracy.filter((m) => m.predictor === "pace").map((m) => m.horizon))
@@ -540,21 +610,6 @@ export function IfcTakeoff({
             </div>
           )}
 
-          <div className="seg">
-            <button
-              className={`btn btn-sm ${paintMode === "cpi" ? "btn-primary" : "btn-ghost"}`}
-              onClick={() => setPaintMode("cpi")}
-            >
-              Cost performance
-            </button>
-            <button
-              className={`btn btn-sm ${paintMode === "exposure" ? "btn-primary" : "btn-ghost"}`}
-              onClick={() => setPaintMode("exposure")}
-            >
-              Unspent exposure
-            </button>
-          </div>
-
           {sequence && centresByPeriod && costMap && (
             <div className="seg">
               <button
@@ -578,30 +633,19 @@ export function IfcTakeoff({
               {playT !== null && (
                 <button
                   className="btn btn-sm btn-ghost"
+                  // Hands the slider back to the period the tab was scrubbed to. It no longer restores
+                  // the whole model, because the slider draws the same sequence playback does — there
+                  // is nothing to restore it from.
                   onClick={() => {
                     setPlaying(false);
                     setPlayT(null);
-                    prevFrameRef.current = null;
-                    const viewer = viewerRef.current;
-                    const model = modelRef.current;
-                    if (viewer && model && index) void showAllElements(viewer, model, index);
                   }}
                 >
-                  Reset
+                  Stop
                 </button>
               )}
             </div>
           )}
-
-          <label className="btn btn-sm btn-secondary file-pick">
-            Load another IFC
-            <input
-              type="file"
-              accept=".ifc"
-              onChange={(e) => void onPick(e.target.files?.[0])}
-              disabled={busy}
-            />
-          </label>
         </div>
 
         <div className="model-canvas" ref={hostRef} role="img" aria-label="Loaded IFC model">
@@ -613,44 +657,54 @@ export function IfcTakeoff({
           )}
         </div>
 
+        {/* One line of numbers, with the caveat behind a disclosure.
+            The caveat has to stay reachable — it is the difference between a forecast and a promise —
+            but as four lines of standing prose it was costing the model 100px and getting skipped
+            anyway. The summary states which kind of number is on screen; the detail says why. */}
         {drawT !== null && (
-          <p className="provenance-badge" data-sequence-readout data-tier={scrubTier}>
-            <b>Period {Math.floor(drawT)}</b> · {builtCount.toLocaleString()} of{" "}
-            {index?.mappedLocalIds.length.toLocaleString()} priced elements standing
-            {shellCount > 0 && <> · {shellCount.toLocaleString()} more might be</>} · coloured by
-            each element&apos;s own cost centre.{" "}
+          <details className="readout" data-sequence-readout data-tier={scrubTier}>
+            <summary>
+              <b>Period {Math.floor(drawT)}</b> · {builtCount.toLocaleString()} of{" "}
+              {index?.mappedLocalIds.length.toLocaleString()} standing
+              {shellCount > 0 && <> · {shellCount.toLocaleString()} might be</>}
+              {scrubTier === "measured" && <> · <b>reported</b></>}
+              {scrubTier === "forecast" && (
+                <> · <b>forecast</b>{shownMae !== null && <> ±{shownMae.toFixed(1)} pp</>}</>
+              )}
+              {scrubTier === "extrapolated" && <> · <b>extrapolated</b>, no error bar</>}
+            </summary>
             {scrubTier === "measured" ? (
-              <>
+              <p>
                 <b>The order is assumed, the amounts are not:</b> the sheet records percent complete
                 per cost centre, never per element, so elements rise bottom-up within their trade
                 while the pace and the colour come from the workbook.
-              </>
+              </p>
             ) : scrubTier === "forecast" ? (
-              <>
+              <p>
                 <b>Forecast, not reported.</b> The workbook ends at period {progress?.originPeriod};
                 this is each centre&apos;s {progress?.method} carried forward. Back-tested on this
                 project&apos;s own history at this horizon:{" "}
                 {shownMae !== null ? <>mean error <b>±{shownMae.toFixed(1)} pp</b> of progress</> : "measured"}.
                 Solid work is projected to stand even at the pessimistic end; translucent work is
                 inside the band and may not be there by then.
-              </>
+              </p>
             ) : (
-              <>
+              <p>
                 <b>Extrapolated — no error bar earned here.</b> Same arithmetic as the forecast, but
                 the workbook is only long enough to measure accuracy{" "}
                 {lastMeasuredHorizon > 0 && <>{lastMeasuredHorizon} periods</>} past period{" "}
                 {progress?.originPeriod}, so nothing validates this distance out. Read it as
                 &ldquo;where this pace leads&rdquo;, not as a date.
-              </>
+              </p>
             )}
-          </p>
+          </details>
         )}
 
         {zoneMap && (
           <div className="model-legend">
-            {/* The register paints each element by its own cost centre, so the categorical key is
-                the centre's alert level, not a zone rollup. The exposure ramp is the same either way. */}
-            {(index && paintMode === "cpi" ? centreLegend() : legendFor(paintMode)).map((l) => (
+            {/* The register paints each element by its own cost centre, so the key is the centre's
+                alert level rather than a zone rollup. */}
+            {centreLegend().map((l) => (
               <span key={l.label} className="legend-item" title={l.note}>
                 <i style={{ background: hex(l.color) }} aria-hidden="true" />
                 {l.label}
@@ -671,17 +725,25 @@ export function IfcTakeoff({
           </div>
         )}
 
-        <p className="provenance-badge">
-          <strong>This is not Tower X.</strong> It is a school&apos;s structural model (Autodesk
-          Revit sample, IFC4) being priced with <strong>Tower X&apos;s rate library</strong> and
-          coloured with <strong>Tower X&apos;s zone cost</strong>. The two buildings are unrelated —
-          what is being demonstrated is that a rate library and a cost plan travel to any model you
-          can measure. A colour here means &ldquo;an element of this kind maps to a zone in that
-          state&rdquo;, never that this building holds that budget.{" "}
-          <button className="btn btn-sm btn-ghost" onClick={() => setShowRules((s) => !s)}>
-            {showRules ? "Hide pricing rules" : "Show pricing rules"}
-          </button>
-        </p>
+        {/* The claim stays on screen at all times; the paragraph explaining it does not need to.
+            A one-line caveat gets read, and the full version is one click away — which is a better
+            trade than 130px of standing prose that a reader's eye learns to skip. */}
+        <details className="readout readout-caveat">
+          <summary>
+            <strong>This is not Tower X</strong> — a school model priced at Tower X&apos;s rates
+          </summary>
+          <p>
+            It is a school&apos;s structural model (Autodesk Revit sample, IFC4) being priced with{" "}
+            <strong>Tower X&apos;s rate library</strong> and coloured with{" "}
+            <strong>Tower X&apos;s zone cost</strong>. The two buildings are unrelated — what is
+            being demonstrated is that a rate library and a cost plan travel to any model you can
+            measure. A colour here means &ldquo;an element of this kind maps to a zone in that
+            state&rdquo;, never that this building holds that budget.{" "}
+            <button className="btn btn-sm btn-ghost" onClick={() => setShowRules((s) => !s)}>
+              {showRules ? "Hide pricing rules" : "Show pricing rules"}
+            </button>
+          </p>
+        </details>
 
         {showRules && pricing && (
           <>
@@ -863,7 +925,25 @@ export function IfcTakeoff({
           </div>
         )}
 
-        {pricing && pricing.priced.length > 0 && (
+        {/* One question at a time. Each label carries its own headline so switching is a choice about
+            what to read next, never the only way to find out a number exists. */}
+        <div className="subtabs" role="tablist" aria-label="Take-off evidence">
+          {evidencePanels.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              role="tab"
+              aria-selected={sidePanel === p.key}
+              className={`subtab ${sidePanel === p.key ? "is-active" : ""}`}
+              onClick={() => setSidePanel(p.key)}
+            >
+              {p.label}
+              {p.hint && <span className="subtab-hint">{p.hint}</span>}
+            </button>
+          ))}
+        </div>
+
+        {sidePanel === "priced" && pricing && pricing.priced.length > 0 && (
           <div className="card">
             <h3>What could be priced</h3>
             <div className="grid-scroll">
@@ -896,7 +976,7 @@ export function IfcTakeoff({
           </div>
         )}
 
-        {pricing && pricing.unpriced.length > 0 && (
+        {sidePanel === "priced" && pricing && pricing.unpriced.length > 0 && (
           <div className="card">
             <h3>What could not — and why</h3>
             <p className="note-warn">
@@ -935,7 +1015,7 @@ export function IfcTakeoff({
           </div>
         )}
 
-        {pricing && (pricing.quantityVariances.length > 0 || pricing.uncomparableQuantities.length > 0) && (
+        {sidePanel === "bill" && pricing && (pricing.quantityVariances.length > 0 || pricing.uncomparableQuantities.length > 0) && (
           <div className="card">
             <h3>Does the model agree with the bill?</h3>
 
@@ -1005,7 +1085,7 @@ export function IfcTakeoff({
           </div>
         )}
 
-        {report && (
+        {sidePanel === "measurable" && report && (
           <div className="card">
             <h3>Can this model be measured?</h3>
             {report.baseQuantitiesEmpty && (
@@ -1054,7 +1134,7 @@ export function IfcTakeoff({
           </div>
         )}
 
-        {zoneMap && (
+        {sidePanel === "plan" && zoneMap && (
           <div className="card">
             <h3>Could this model be located in the cost plan?</h3>
             <div className="kpis kpis-2">
@@ -1098,32 +1178,40 @@ export function IfcTakeoff({
 
                 <p className="muted small">{index.map.mappingBasis}</p>
 
-                <h4>The bindings</h4>
-                <div className="grid-scroll">
-                  <table className="grid">
-                    <thead>
-                      <tr>
-                        <th>Class</th>
-                        <th>BOQ item</th>
-                        <th className="num">n</th>
-                        <th>Why</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {index.map.rules.map((r) => (
-                        <tr key={`${r.ifcClass}-${r.boqItemRef}`}>
-                          <td className="mono small">{r.ifcClass}</td>
-                          <td className="mono">
-                            {r.boqItemRef}
-                            <span className="muted small"> {r.role}</span>
-                          </td>
-                          <td className="num">{r.elementCount}</td>
-                          <td className="muted small">{r.basis}</td>
+                {/* Reference, not a finding: the rule-by-rule audit trail, wanted occasionally and
+                    long enough to bury everything under it. Collapsed, with its row count on the
+                    summary so its size is never a surprise. */}
+                <details className="drill">
+                  <summary>
+                    The bindings
+                    <span className="muted small"> · {index.map.rules.length} rules</span>
+                  </summary>
+                  <div className="grid-scroll">
+                    <table className="grid">
+                      <thead>
+                        <tr>
+                          <th>Class</th>
+                          <th>BOQ item</th>
+                          <th className="num">n</th>
+                          <th>Why</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {index.map.rules.map((r) => (
+                          <tr key={`${r.ifcClass}-${r.boqItemRef}`}>
+                            <td className="mono small">{r.ifcClass}</td>
+                            <td className="mono">
+                              {r.boqItemRef}
+                              <span className="muted small"> {r.role}</span>
+                            </td>
+                            <td className="num">{r.elementCount}</td>
+                            <td className="muted small">{r.basis}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
 
                 {index.map.unmapped.length > 0 && (
                   <>
@@ -1235,26 +1323,32 @@ export function IfcTakeoff({
               here&rdquo;, never that it shares that budget.
             </p>
 
-            <div className="grid-scroll">
-              <table className="grid">
-                <thead>
-                  <tr>
-                    <th>Zone</th>
-                    <th className="num">Elements</th>
-                    <th>From</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {zoneMap.matched.map((m) => (
-                    <tr key={m.zoneCode}>
-                      <td className="mono">{m.zoneCode}</td>
-                      <td className="num">{m.elementCount}</td>
-                      <td className="muted small mono">{m.ifcClasses.join(", ")}</td>
+            <details className="drill">
+              <summary>
+                Which zones it reached
+                <span className="muted small"> · {zoneMap.matched.length} zones</span>
+              </summary>
+              <div className="grid-scroll">
+                <table className="grid">
+                  <thead>
+                    <tr>
+                      <th>Zone</th>
+                      <th className="num">Elements</th>
+                      <th>From</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {zoneMap.matched.map((m) => (
+                      <tr key={m.zoneCode}>
+                        <td className="mono">{m.zoneCode}</td>
+                        <td className="num">{m.elementCount}</td>
+                        <td className="muted small mono">{m.ifcClasses.join(", ")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
 
             {zoneMap.unmatched.length > 0 && (
               <p className="muted small">
@@ -1273,7 +1367,7 @@ export function IfcTakeoff({
           </div>
         )}
 
-        {measurement && (
+        {sidePanel === "measurable" && measurement && (
           <div className="card">
             <h3>Measured by class</h3>
             <div className="grid-scroll">

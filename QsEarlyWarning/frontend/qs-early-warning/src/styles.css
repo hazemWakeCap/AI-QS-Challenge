@@ -466,7 +466,54 @@ tr.selected td { background: var(--accent-weak); box-shadow: inset 3px 0 0 var(-
 .modelview-side { display: flex; flex-direction: column; gap: var(--sp-4); }
 .modelview-side h3 { margin: 0 0 var(--sp-3); font-size: var(--fs-h3); }
 
-.model-canvas { position: relative; width: 100%; height: 520px; border-radius: var(--r-md);
+/* Evidence sub-navigation.
+   Deliberately not styled like the app's top-level `.tabs`: this is navigation within one tab, and
+   two identical-looking tab strips stacked would read as one confused hierarchy. Segmented, sized
+   down, and each label carries its own headline figure. */
+.subtabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px;
+  padding: 3px; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-md); }
+.subtab { display: flex; flex-direction: column; align-items: center; gap: 1px;
+  background: transparent; border: none; border-radius: var(--r-sm);
+  padding: 6px 4px; cursor: pointer; font: inherit; font-size: var(--fs-sm);
+  font-weight: 600; color: var(--muted); line-height: 1.25; text-align: center; }
+.subtab:hover { background: rgba(47,111,224,.08); color: var(--text); }
+.subtab.is-active { background: var(--surface); color: var(--text); box-shadow: var(--sh-1); }
+.subtab-hint { font-size: var(--fs-eyebrow); font-weight: 500; color: var(--muted);
+  font-variant-numeric: tabular-nums; }
+.subtab.is-active .subtab-hint { color: var(--accent); }
+
+/* A reference table folded away — wanted sometimes, long enough to bury what sits under it.
+   The row count rides on the summary so its size is never a surprise. */
+.drill { margin: var(--sp-4) 0 0; }
+.drill > summary { cursor: pointer; font-size: var(--fs-h3); font-weight: 600;
+  color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+  padding: var(--sp-2) 0; list-style: none; display: flex; align-items: center; gap: 6px; }
+.drill > summary::-webkit-details-marker { display: none; }
+/* Drawn from borders rather than a glyph: ▸ is missing from the UI font at this size and fell back
+   to something indistinguishable from a bullet. */
+.drill > summary::before { content: ""; width: 0; height: 0; flex: none;
+  border-left: 5px solid currentColor; border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent; transition: transform var(--dur); }
+.drill[open] > summary::before { transform: rotate(90deg); }
+.drill > summary:hover { color: var(--text); }
+.drill > summary .muted { text-transform: none; letter-spacing: 0; font-weight: 500; }
+
+/* The stage stays put while the evidence column scrolls.
+   Clicking an element and then reading what the bill says about it used to push the model off the
+   top of the screen — on a 3D tab, losing sight of the thing you selected is the whole problem.
+
+   The whole stage has to fit the viewport, because a sticky block taller than the screen scrolls
+   with you and anything below the fold inside it can never be brought into view. That budget is why
+   the two notes below the canvas are one line each with the detail behind a disclosure: standing
+   prose costs the model the space it was taking.
+
+   `position` must beat `.card`, which sets `relative` at equal specificity — this rule wins only by
+   coming later in the file, so it stays below the card block. */
+.modelview-stage { position: sticky; top: var(--sp-4); }
+
+.model-canvas { position: relative; width: 100%; height: min(520px, calc(100vh - 270px));
+  min-height: 260px; border-radius: var(--r-md);
   border: 1px solid var(--border); overflow: hidden;
   background: linear-gradient(180deg, #eef2f9 0%, #dfe6f1 100%); }
 .model-canvas canvas { display: block; width: 100% !important; height: 100% !important; }
@@ -502,14 +549,13 @@ tr.selected td { background: var(--accent-weak); box-shadow: inset 3px 0 0 var(-
 @media (max-width: 940px) {
   .modelview { grid-template-columns: 1fr; }
   .model-canvas { height: 380px; }
+  /* One column: the stage no longer sits beside the panels, so pinning it would cover them. */
+  .modelview-stage { position: static; }
+  /* Four labels with figures do not fit a phone; two rows of two do. */
+  .subtabs { grid-template-columns: repeat(2, 1fr); }
 }
 .kpis-2 { grid-template-columns: repeat(2, 1fr); }
 
-/* File picker styled as a button — the native input is hidden, not removed, so it stays keyboard
-   reachable and the label remains its accessible name. */
-.file-pick { position: relative; overflow: hidden; cursor: pointer; }
-.file-pick input[type="file"] { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
-.file-pick input[type="file"]:disabled { cursor: not-allowed; }
 .model-loading p { margin: var(--sp-2) 0 0; }
 /* Validation panel: challenger deltas read green/red against the deployed rule. */
 .mini td.good, .mini th.good { color: var(--good); }
@@ -555,13 +601,32 @@ tr.selected td { background: var(--accent-weak); box-shadow: inset 3px 0 0 var(-
 }
 .pill-sm { font-size: var(--fs-eyebrow); padding: 2px 7px; }
 
+/* A standing note compressed to one line, with the reasoning behind a disclosure.
+   Same visual weight as the provenance badge it replaced — this is still a note the page is making,
+   not a control — but it costs one line instead of four until asked. */
+.readout { margin: var(--sp-3) 0 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md);
+  background: var(--surface-2); border: 1px solid var(--border-soft);
+  font-size: var(--fs-sm); line-height: 1.5; color: var(--muted); }
+.readout > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline;
+  gap: 4px; flex-wrap: wrap; }
+.readout > summary::-webkit-details-marker { display: none; }
+.readout > summary::after { content: "why"; margin-left: auto; padding-left: var(--sp-3);
+  font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: .06em;
+  color: var(--accent); white-space: nowrap; }
+.readout[open] > summary::after { content: "close"; }
+.readout > summary b, .readout > summary strong { color: var(--text); }
+.readout > p { margin: var(--sp-2) 0 0; padding-top: var(--sp-2);
+  border-top: 1px solid var(--border-soft); }
+.readout > p strong, .readout > p b { color: var(--text); }
+.readout .btn { margin-left: 6px; vertical-align: baseline; }
+
 /* The sequence readout takes the colour of the claim it is making: neutral for reported work, amber
    for a back-tested forecast, hollow for extrapolation past anything measured. */
-.provenance-badge[data-tier="forecast"] {
+.readout[data-tier="forecast"] {
   background: rgba(217,154,28,.08); border-color: rgba(217,154,28,.32);
   border-left: 3px solid var(--warn);
 }
-.provenance-badge[data-tier="extrapolated"] {
+.readout[data-tier="extrapolated"] {
   background: var(--surface-2); border-color: var(--border);
   border-left: 3px dashed var(--muted);
 }

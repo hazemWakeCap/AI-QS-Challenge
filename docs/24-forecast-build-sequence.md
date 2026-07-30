@@ -130,7 +130,18 @@ past the origin so a centre creeping at 0.3 pp/period cannot request a 297-perio
 ## How to use it
 
 On the **IFC Take-off** tab: drag the period slider past 12, or press **▶ Build** and let it run
-1 → 21. Scrubbing past the origin repaints in place; the 8 MB IFC is never re-parsed.
+1 → 21. Scrubbing repaints in place; the 8 MB IFC is never re-parsed.
+
+**The slider and ▶ Build render the same frames.** The slider means "what stands at period N" across
+the whole range, and playback is an auto-scrub of it. An earlier version had the slider recolour a
+permanently-complete building while only ▶ Build made it rise, which produced a visible seam the
+moment the projection arrived: stepping from period 12 to 13 took the model from all 1,127 elements
+down to 887, so the building shrank while moving forward in time. One meaning for the slider is what
+removes that.
+
+The cost of that choice, stated: there is no longer a view of the whole scope coloured at an early
+period — at period 5 you see the ~30% that is built. The side panels carry the full-scope cost
+picture, which is the better place for it.
 
 ## API
 

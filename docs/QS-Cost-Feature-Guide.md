@@ -940,9 +940,11 @@ feature: the zone with the worst ratio is not the zone with the most money left 
 
 **Why a QS cares**
 
-Point the system at any IFC model and it will measure what it can, price it with the project's
-own rate library, and — crucially — tell you what it *could not* price and why. The unpriced
-residual is the interesting part: it is scope the estimate never carried.
+Given an IFC model, the system measures what it can, prices it with the project's own rate
+library, and — crucially — tells you what it *could not* price and why. The unpriced residual is
+the interesting part: it is scope the estimate never carried. The pipeline is model-agnostic —
+nothing in it knows which building it was handed — though the tab ships one bundled sample rather
+than a file picker.
 
 **How it works**
 
