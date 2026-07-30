@@ -41,6 +41,36 @@ public static class IncrementHelper
         return n > 0 ? s / n : null;
     }
 
+    /// <summary>Actual-percent-complete increment Δ(k) = ActualPctComplete(k) − ActualPctComplete(k−1),
+    /// in percentage points.</summary>
+    public static double? ActualPctInc(IReadOnlyDictionary<int, CostCentrePeriod> byPeriod, int k)
+        => Diff(byPeriod, k, r => r.ActualPctComplete);
+
+    /// <summary>Planned-percent-complete increment Δ(k), in percentage points. Used only as a back-test
+    /// baseline — the plan curve stops at the last reported period, so it cannot serve a projection.</summary>
+    public static double? PlanPctInc(IReadOnlyDictionary<int, CostCentrePeriod> byPeriod, int k)
+        => Diff(byPeriod, k, r => r.PlanPctComplete);
+
+    /// <summary>Recent physical progress pace: mean of the present actual-percent increments over the
+    /// ≤<see cref="ProgressConfig.PaceWindow"/> periods ending at k (percentage points per period).
+    /// Null if no adjacent increment is present — which is a stalled centre, not a pace of zero.</summary>
+    public static double? RecentProgressPace(IReadOnlyDictionary<int, CostCentrePeriod> byPeriod, int k)
+    {
+        double s = 0; int n = 0;
+        for (int j = k; j > k - ProgressConfig.PaceWindow; j--)
+            if (ActualPctInc(byPeriod, j) is double d) { s += d; n++; }
+        return n > 0 ? s / n : null;
+    }
+
+    /// <summary>Recent planned pace: the same window over the plan curve, for the baseline comparison.</summary>
+    public static double? RecentPlanPace(IReadOnlyDictionary<int, CostCentrePeriod> byPeriod, int k)
+    {
+        double s = 0; int n = 0;
+        for (int j = k; j > k - ProgressConfig.PaceWindow; j--)
+            if (PlanPctInc(byPeriod, j) is double d) { s += d; n++; }
+        return n > 0 ? s / n : null;
+    }
+
     /// <summary>Rolling CPI over the ≤3 present periods ending at k (current period included):
     /// ΣΔEV ÷ ΣΔAC (sum-of-increments, not a mean of per-period ratios). Null if the AC denominator is 0/absent.</summary>
     public static double? RollCpi(IReadOnlyDictionary<int, CostCentrePeriod> byPeriod, int k)

@@ -183,11 +183,38 @@ export async function paintIfcByCostCentre(
 }
 
 /**
+ * How firmly a sequence element is drawn.
+ *
+ * Opacity is the only thing that separates measured work from projected work, and that is deliberate:
+ * hue already means cost performance, and giving "forecast" its own colour would either collide with
+ * that scale or invent a verdict the data does not support. So an AMBER centre stays amber whether
+ * its work is reported or projected — what changes is how solid it looks.
+ *
+ * `Shell` sits above {@link UNPLACED_OPACITY} so the never-priced ghosts remain the faintest thing on
+ * screen. The scope gap is a harder fact than any projection and must not be outshouted by one.
+ */
+const SEQUENCE_OPACITY = {
+  /** Reported, or projected to stand even on the pessimistic end. */
+  solid: 1,
+  /** Projected to stand at the median, but not at the pessimistic end. */
+  likely: 0.7,
+  /** Inside the band between median and optimistic — may or may not be there by this period. */
+  shell: 0.3,
+} as const;
+
+type SequenceWeight = keyof typeof SEQUENCE_OPACITY;
+
+/**
  * Draws one frame of the construction sequence.
  *
  * Elements that have not been reached yet are hidden outright rather than ghosted, so the building
  * genuinely rises instead of fading in — a half-transparent column reads as a design option, not as
  * work that has not happened.
+ *
+ * Past the last reported period the frame carries a band, and the band is drawn rather than described:
+ * work the projection is confident about stays solid, work only its optimistic end reaches is
+ * translucent. A QS looking at period 18 can see which parts of that building are a claim and which
+ * are a hope, without reading a caption.
  *
  * Elements the bill prices nothing for never join the sequence. They stay as faint ghosts for the
  * whole run, which is the scope gap made visual: 375 beams that never get built because no item
@@ -215,34 +242,38 @@ export async function paintSequenceFrame(
   // over the WHOLE model and begins again. The cost of a mutation is therefore proportional to the
   // model, not to how much changed — so the winning move is to issue as few calls as possible, not
   // to touch as few elements as possible.
-  const appear = new Map<number, number>();   // localId → colour
-  const recolour = new Map<number, number>();
+  //
+  // The diff is keyed on STYLE (colour + weight), not colour alone. That is what lets an element
+  // crossing from the uncertain shell into confidently-built cost one `highlight` — the same call an
+  // alert change already cost — rather than needing a second mechanism of its own.
+  const appear = new Map<number, number>();   // localId → style key
+  const restyle = new Map<number, number>();
   const vanish: number[] = [];
 
-  for (const localId of frame.built) {
-    const color = colorForCentreAlert(frame.alertByLocalId.get(localId));
-    if (!previous?.built.has(localId)) {
-      appear.set(localId, color);
-    } else if (colorForCentreAlert(previous.alertByLocalId.get(localId)) !== color) {
-      recolour.set(localId, color);
+  for (const localId of visibleIn(frame)) {
+    const style = styleKeyFor(frame, localId);
+    if (previous === null || !isVisible(previous, localId)) {
+      appear.set(localId, style);
+    } else if (styleKeyFor(previous, localId) !== style) {
+      restyle.set(localId, style);
     }
   }
 
   if (previous) {
-    for (const localId of previous.built) {
-      if (!frame.built.has(localId)) vanish.push(localId);
+    for (const localId of visibleIn(previous)) {
+      if (!isVisible(frame, localId)) vanish.push(localId);
     }
   }
 
   const first = previous === null;
-  if (!first && appear.size === 0 && recolour.size === 0 && vanish.length === 0) return;
+  if (!first && appear.size === 0 && restyle.size === 0 && vanish.length === 0) return;
 
   // Nothing below reaches the worker until `frozen` is cleared, so the whole frame lands as one
   // batch rather than as a dozen separate whole-model restarts.
   model.frozen = true;
   try {
     if (first) {
-      const hidden = index.mappedLocalIds.filter((id) => !frame.built.has(id));
+      const hidden = index.mappedLocalIds.filter((id) => !isVisible(frame, id));
       if (hidden.length > 0) model.setVisible(hidden, false);
 
       // Never priced, so never built — held on screen throughout as the scope with no money behind it.
@@ -256,12 +287,12 @@ export async function paintSequenceFrame(
 
     // One `highlight` instead of a setColor + setOpacity pair: both are wrappers over the same
     // worker call, so pairing them doubled the restarts for no gain.
-    for (const [color, ids] of groupByColor(appear)) {
+    for (const [style, ids] of groupByStyle(appear)) {
       model.setVisible(ids, true);
-      model.highlight(ids, builtStyle(color));
+      model.highlight(ids, styleFromKey(style));
     }
-    for (const [color, ids] of groupByColor(recolour)) {
-      model.highlight(ids, builtStyle(color));
+    for (const [style, ids] of groupByStyle(restyle)) {
+      model.highlight(ids, styleFromKey(style));
     }
   } finally {
     model.frozen = false;
@@ -273,23 +304,56 @@ export async function paintSequenceFrame(
   else await viewer.fragments.core.update(false);
 }
 
-/** localId → colour, inverted into colour → localIds so each colour costs one call. */
-function groupByColor(byLocalId: Map<number, number>): Map<number, number[]> {
+/** Every element the frame puts on screen, built or merely possible. */
+function visibleIn(frame: SequenceFrame): Iterable<number> {
+  return frame.shell.size === 0 ? frame.built : [...frame.built, ...frame.shell];
+}
+
+function isVisible(frame: SequenceFrame, localId: number): boolean {
+  return frame.built.has(localId) || frame.shell.has(localId);
+}
+
+/** How firmly one element should read in one frame. */
+function weightFor(frame: SequenceFrame, localId: number): SequenceWeight {
+  if (frame.shell.has(localId)) return "shell";
+  // `confident` is empty for measured frames, where every built element is solid by definition.
+  if (frame.tier === "measured" || frame.confident.has(localId)) return "solid";
+  return "likely";
+}
+
+/**
+ * Colour and weight packed into one integer, so the diff can compare styles with `!==` and the
+ * grouping can bucket them in a plain Map.
+ *
+ * Colours are 24-bit, so shifting left by two and packing the weight below is lossless.
+ */
+const WEIGHTS: readonly SequenceWeight[] = ["solid", "likely", "shell"];
+
+function styleKeyFor(frame: SequenceFrame, localId: number): number {
+  const color = colorForCentreAlert(frame.alertByLocalId.get(localId));
+  return (color << 2) | WEIGHTS.indexOf(weightFor(frame, localId));
+}
+
+function styleFromKey(key: number): FRAGS.MaterialDefinition {
+  const opacity = SEQUENCE_OPACITY[WEIGHTS[key & 0b11]];
+  return {
+    color: new THREE.Color(key >>> 2),
+    renderedFaces: FRAGS.RenderedFaces.TWO,
+    opacity,
+    transparent: opacity < 1,
+  };
+}
+
+/** localId → style, inverted into style → localIds so each distinct style costs one call. */
+function groupByStyle(byLocalId: Map<number, number>): Map<number, number[]> {
   const out = new Map<number, number[]>();
-  for (const [localId, color] of byLocalId) {
-    const bucket = out.get(color);
+  for (const [localId, style] of byLocalId) {
+    const bucket = out.get(style);
     if (bucket) bucket.push(localId);
-    else out.set(color, [localId]);
+    else out.set(style, [localId]);
   }
   return out;
 }
-
-const builtStyle = (color: number): FRAGS.MaterialDefinition => ({
-  color: new THREE.Color(color),
-  renderedFaces: FRAGS.RenderedFaces.TWO,
-  opacity: 1,
-  transparent: false,
-});
 
 const ghostStyle = (): FRAGS.MaterialDefinition => ({
   color: new THREE.Color(UNPLACED),

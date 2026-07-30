@@ -28,6 +28,11 @@ public sealed record ProjectSnapshot
     /// snapshot Build() and refreshed via RebuildAsync — the registry has no change detection.</summary>
     public IncrementalSpendForecaster? Forecaster { get; init; }
     public ForecastValidationSummary? ForecastBacktest { get; init; }
+    /// <summary>Physical-progress projection past the last reported period + its back-test (null if it
+    /// could not be evaluated). Distinct from <see cref="Forecaster"/>, which projects spend: the 4D build
+    /// sequence reveals geometry from percent complete, so it needs this one and cannot use that one.</summary>
+    public ProgressForecaster? ProgressForecaster { get; init; }
+    public ProgressValidationSummary? ProgressBacktest { get; init; }
     /// <summary>Idea-3 Estimate Assumption Stress Test (null unless this is the estimate's owning project,
     /// or if the workbook is unavailable). Built at snapshot Build() from the workbook + this panel.</summary>
     public StressTestReport? StressTest { get; init; }
@@ -147,6 +152,19 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
         }
         catch { /* forecaster unavailable for this project; leave null */ }
 
+        // Physical-progress projection: a separate forecaster with a separate back-test, because it
+        // predicts percent complete rather than spend. Degrades independently — the spend forecast and
+        // the 4D sequence must not be able to take each other down.
+        ProgressForecaster? progressForecaster = null;
+        ProgressValidationSummary? progressBacktest = null;
+        try
+        {
+            var validation = new ProgressBacktest().Evaluate(panel, model.Origins);
+            progressForecaster = new ProgressForecaster(panel, model.Origins.ForecastPeriod, validation);
+            progressBacktest = validation;
+        }
+        catch { /* progress projection unavailable for this project; leave null */ }
+
         // Idea-3 stress test + Idea-5 resource mix: only the estimate's owning project returns a model
         // (gated by project id). Degrade gracefully like the forecaster.
         StressTestReport? stressTest = null;
@@ -183,6 +201,8 @@ public sealed class ProjectSnapshotRegistry : IProjectSnapshotRegistry
             BuiltAtUtc = DateTimeOffset.UtcNow,
             Forecaster = forecaster,
             ForecastBacktest = backtest,
+            ProgressForecaster = progressForecaster,
+            ProgressBacktest = progressBacktest,
             StressTest = stressTest,
             ResourceMix = resourceMix,
             Geometry = geometry,

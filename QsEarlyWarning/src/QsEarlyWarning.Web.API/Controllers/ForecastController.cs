@@ -72,6 +72,38 @@ public sealed class ForecastController : ControllerBase
             s.Overall.Select(Map).ToList(), s.EarlyBand.Select(Map).ToList(), s.Notes));
     }
 
+    /// <summary>
+    /// Physical percent complete projected past the last reported period — what the 4D build sequence
+    /// consumes to keep rising after the workbook stops.
+    ///
+    /// <paramref name="bcc"/> is a comma-separated centre list; omit it for every centre. <paramref name="through"/>
+    /// is the last period to project; omit it to run to the period the slowest requested centre tops out.
+    /// Both are capped at the forecaster's max horizon past the origin.
+    /// </summary>
+    [HttpGet("progress")]
+    public async Task<IActionResult> Progress([FromQuery] string? bcc, [FromQuery] int? through, CancellationToken ct)
+    {
+        var (snap, err) = await Resolve(ct); if (err is not null) return err;
+        if (snap!.ProgressForecaster is null) return NoForecast();
+
+        var ids = bcc?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var f = snap.ProgressForecaster.Project(ids, through);
+
+        return Ok(new ProgressForecastDto(
+            f.OriginPeriod, f.HorizonPeriod, f.BacktestedThroughPeriod, f.SuggestedHorizonPeriod, f.Method,
+            f.Centres.Select(c => new CentreProgressDto(
+                c.BccId, c.OriginPeriod, Round(c.ActualPctAtOrigin), Round(c.PacePctPerPeriod),
+                c.ProjectedFinishPeriod, c.Stalled, c.AlertAtOrigin,
+                c.Points.Select(p => new ProgressPointDto(
+                    p.Period, Round(p.P50Pct), San(p.P10Pct), San(p.P90Pct), p.Tier.ToString())).ToList())).ToList(),
+            new ProgressValidationDto(
+                f.Validation.Provenance, f.Validation.OriginMin, f.Validation.OriginMax, f.Validation.Centres,
+                f.Validation.Metrics.Select(m => new ProgressHorizonMetricDto(
+                    m.Predictor, m.Horizon, m.N, Round(m.MaePp), San(m.CoverageP10P90))).ToList(),
+                f.Validation.Bands.Select(b => new ProgressBandDto(b.Horizon, Round(b.P10), Round(b.P90), b.N)).ToList(),
+                f.Validation.Notes)));
+    }
+
     private static HorizonMetricDto Map(HorizonMetric m) => new(
         m.Predictor, m.Horizon, m.N, Round(m.MaePctOfBac), Round(m.Wape),
         San(m.CoverageP10P90), San(m.CoverageLow), San(m.CoverageHigh), m.FallbackCount);

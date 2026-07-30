@@ -84,6 +84,23 @@ export interface LegendRow {
   label: string;
   color: number;
   note: string;
+  /** Draws the swatch at reduced opacity, for the sequence's projected weights. */
+  opacity?: number;
+}
+
+/**
+ * Legend for a projected period of the build sequence.
+ *
+ * Deliberately carries no new colour: hue means cost performance throughout the app, and a projected
+ * AMBER centre is still amber. What the projection changes is how solid the work reads, so this key
+ * explains the opacity scale rather than adding to the colour scale.
+ */
+export function forecastLegend(): LegendRow[] {
+  return [
+    { label: "Standing", color: UNKNOWN, note: "reported, or projected even at the pessimistic end", opacity: 1 },
+    { label: "Expected", color: UNKNOWN, note: "projected to stand at the median", opacity: 0.7 },
+    { label: "Might be", color: UNKNOWN, note: "inside the band — may not be there by this period", opacity: 0.3 },
+  ];
 }
 
 /**

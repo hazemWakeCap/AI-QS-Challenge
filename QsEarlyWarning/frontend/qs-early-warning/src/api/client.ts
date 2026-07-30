@@ -87,6 +87,16 @@ export interface CentreForecast { bccId: string; originPeriod: number; progressP
 export interface ProjectSpendScenario { originPeriod: number; p10: number; p50: number; p90: number; centres: number; draws: number; }
 export interface HorizonMetric { predictor: string; horizon: number; n: number; maePctOfBac: number; wape: number; coverage: number | null; coverageLow: number | null; coverageHigh: number | null; fallbackCount: number; }
 export interface ForecastBacktest { provenance: string; originMin: number; originMax: number; foldsEvaluated: number; foldsSkipped: number; overall: HorizonMetric[]; earlyBand: HorizonMetric[]; notes: string[]; }
+// Physical-progress projection — what lets the 4D build sequence run past the last reported period.
+// Percentages are 0..100. Deliberately carries no cost figure: this says how much of a centre stands,
+// and deriving spend from it would manufacture an unvalidated final-cost number.
+export type ProgressTier = "Measured" | "Forecast" | "Extrapolated";
+export interface ProgressPoint { period: number; p50Pct: number; p10Pct: number | null; p90Pct: number | null; tier: ProgressTier; }
+export interface CentreProgress { bccId: string; originPeriod: number; actualPctAtOrigin: number; pacePctPerPeriod: number; projectedFinishPeriod: number | null; stalled: boolean; alertAtOrigin: string | null; points: ProgressPoint[]; }
+export interface ProgressHorizonMetric { predictor: string; horizon: number; n: number; maePp: number; coverage: number | null; }
+export interface ProgressBand { horizon: number; p10: number; p90: number; n: number; }
+export interface ProgressValidation { provenance: string; originMin: number; originMax: number; centres: number; metrics: ProgressHorizonMetric[]; bands: ProgressBand[]; notes: string[]; }
+export interface ProgressForecast { originPeriod: number; horizonPeriod: number; backtestedThroughPeriod: number; suggestedHorizonPeriod: number; method: string; centres: CentreProgress[]; validation: ProgressValidation; }
 // idea-3 Estimate Assumption Stress Test
 export interface ReconciliationFailure { scope: string; check: string; line: string | null; actual: number; expected: number; delta: number; tolerance: number; }
 export interface ReconciliationItem { scope: string; quantityReDerivationOk: boolean; resourceCostIdentityOk: boolean; repeatedContractAmtConsistent: boolean; directTieOutOk: boolean; contractUpliftOk: boolean; directTieOutDelta: number; contractUpliftDelta: number; failures: ReconciliationFailure[]; }
@@ -301,6 +311,16 @@ export const api = {
   forecastCone: (bcc: string) => get<CentreForecast>(`/api/v1/forecast/cone?bcc=${encodeURIComponent(bcc)}`),
   forecastRollup: () => get<ProjectSpendScenario>("/api/v1/forecast/rollup"),
   forecastBacktest: () => get<ForecastBacktest>("/api/v1/forecast/backtest"),
+  // Physical progress past the origin. Pass the centres actually on screen — the horizon comes back
+  // scoped to them, so eight structure centres yield a timeline that tops out rather than the
+  // project-wide one stretched by whichever centre is slowest.
+  progressForecast: (bccIds?: string[], through?: number) => {
+    const q = new URLSearchParams();
+    if (bccIds?.length) q.set("bcc", bccIds.join(","));
+    if (through !== undefined) q.set("through", String(through));
+    const s = q.toString();
+    return get<ProgressForecast>(`/api/v1/forecast/progress${s ? `?${s}` : ""}`);
+  },
   // idea-3 stress test
   stressReconciliation: () => get<Reconciliation>("/api/v1/stress-test/reconciliation"),
   stressAssumptions: (discipline?: string) => get<Assumptions>(`/api/v1/stress-test/assumptions${discipline ? `?discipline=${encodeURIComponent(discipline)}` : ""}`),

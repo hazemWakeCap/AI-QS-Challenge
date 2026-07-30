@@ -3,7 +3,7 @@ import {
   api, type CostCentreEvm, type CostMap, type TakeoffLineRequest, type TakeoffPricing,
 } from "../api/client";
 import { money, millions, ratio, DASH } from "../format";
-import { centreLegend, hex, legendFor, type PaintMode } from "../model/costPaint";
+import { centreLegend, forecastLegend, hex, legendFor, type PaintMode } from "../model/costPaint";
 import { buildCostLinks, TIER_CONFIDENCE, type CostLinkResult } from "../model/ifcCostLink";
 import { buildElementIndex, type ElementMapIndex, type ResolvedElement } from "../model/ifcElementMap";
 import { fetchBundledIfc, loadIfc, readIfcFile } from "../model/ifcLoader";
@@ -12,7 +12,10 @@ import {
   paintIfcByCost, paintIfcByCostCentre, paintSequenceFrame, showAllElements, unplacedLegend,
 } from "../model/ifcPaint";
 import { elementAtPointer, showSelection } from "../model/ifcPick";
-import { buildSequence, frameAt, type BuildSequence, type SequenceFrame } from "../model/ifcSequence";
+import {
+  buildProgressIndex, buildSequence, frameAt, tierAt,
+  type BuildSequence, type ProgressIndex, type SequenceFrame,
+} from "../model/ifcSequence";
 import { mapToZones, type ZoneMapResult } from "../model/ifcZoneMap";
 import { createViewer, fitToBounds, type Viewer } from "../model/viewer";
 import { Spinner } from "./Loading";
@@ -37,6 +40,10 @@ const pct = (n: number, total: number) => (total > 0 ? `${((100 * n) / total).to
 
 /** A measured quantity, to one decimal — the precision a take-off is actually good to. */
 const qty = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 1 });
+
+/** Where a period sits along a slider track, as a percentage — used to band the track by tier. */
+const pctOf = (value: number, min: number, max: number) =>
+  max > min ? (100 * (value - min)) / (max - min) : 100;
 
 export function IfcTakeoff({
   period,
@@ -74,6 +81,15 @@ export function IfcTakeoff({
   const [playT, setPlayT] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const [builtCount, setBuiltCount] = useState(0);
+  /** How many more elements the projection's optimistic end reaches. Zero for measured periods. */
+  const [shellCount, setShellCount] = useState(0);
+  /**
+   * Projected percent complete past the last reported period, so the sequence can run to topping out.
+   *
+   * Null when the endpoint is unavailable, and everything below falls back to the measured range —
+   * the tab worked without a projection before this existed and must keep working without one.
+   */
+  const [progress, setProgress] = useState<ProgressIndex | null>(null);
   /** Last drawn frame, so each tick only applies what actually changed. */
   const prevFrameRef = useRef<SequenceFrame | null>(null);
   /** Serialises frame paints — see the draw effect for why this cannot be fire-and-forget. */
@@ -273,6 +289,24 @@ export function IfcTakeoff({
 
       setCentresByPeriod(new Map(rows));
       setSequence(buildSequence(index));
+
+      // Only the centres this model actually reaches. Asking for all 173 would stretch the horizon to
+      // whichever centre is slowest project-wide — the eight structure centres the register binds top
+      // out inside nine periods, and that is the timeline worth showing here.
+      const mapped = [...new Set(
+        index.mappedLocalIds
+          .flatMap((id) => index.byLocalId.get(id)?.items ?? [])
+          .map((i) => i.bccId)
+          .filter((b): b is string => Boolean(b)),
+      )];
+
+      try {
+        const f = await api.progressForecast(mapped);
+        if (!cancelled) setProgress(buildProgressIndex(f));
+      } catch {
+        // No projection for this project. The sequence still plays the reported periods.
+        if (!cancelled) setProgress(null);
+      }
     })();
 
     return () => { cancelled = true; };
@@ -286,8 +320,11 @@ export function IfcTakeoff({
   // than a lifecycle one.
   const maxPeriodRef = useRef(12);
   useEffect(() => {
-    if (costMap) maxPeriodRef.current = costMap.maxPeriod;
-  }, [costMap]);
+    // The projection's horizon when there is one, so playback runs past the last reported period all
+    // the way to topping out; the reported range when there is not.
+    if (progress) maxPeriodRef.current = progress.horizonPeriod;
+    else if (costMap) maxPeriodRef.current = costMap.maxPeriod;
+  }, [costMap, progress]);
 
   useEffect(() => {
     if (!playing) return;
@@ -308,13 +345,35 @@ export function IfcTakeoff({
   }, [playing, playT]);
 
   // Draw the current frame of the sequence.
+  //
+  // Also owns the static view past the last reported period: `api.costCentres` has no rows to serve
+  // there, and "what stands at period 18" is the only rendering that means anything anyway. So the
+  // sequence painter runs for any period past the origin, whether or not playback is running.
+  const staticT = progress && viewPeriod > progress.originPeriod ? viewPeriod : null;
+  const drawT = playT ?? staticT;
+
+  /** Slider ceiling: the projection's horizon when there is one, else the last reported period. */
+  const sliderMax = progress?.horizonPeriod ?? costMap?.maxPeriod ?? 12;
+
+  /**
+   * The period every cost figure on this tab is read at — the scrub position, held at the origin once
+   * past it.
+   *
+   * The workbook has no rows beyond the origin, so CPI, EV, AC and the drawer all resolve to the last
+   * measured period. They are labelled as such where they appear, never advanced to match the
+   * projected period: this feature forecasts progress, and a projected percentage is not grounds for
+   * inventing a cost.
+   */
+  const dataPeriod = progress ? Math.min(viewPeriod, progress.originPeriod) : viewPeriod;
+
   useEffect(() => {
     const viewer = viewerRef.current;
     const model = modelRef.current;
-    if (!viewer || !model || !index || !sequence || !centresByPeriod || playT === null) return;
+    if (!viewer || !model || !index || !sequence || !centresByPeriod || drawT === null) return;
 
-    const frame = frameAt(playT, sequence, centresByPeriod);
+    const frame = frameAt(drawT, sequence, centresByPeriod, progress);
     setBuiltCount(frame.builtCount);
+    setShellCount(frame.shellCount);
 
     // Serialised on purpose. An earlier version fired the paint and advanced `prevFrameRef`
     // immediately, so if a paint was still in flight the next frame's delta was computed against a
@@ -327,7 +386,18 @@ export function IfcTakeoff({
         prevFrameRef.current = frame;
       })
       .catch(() => { /* a dropped frame must not poison the chain */ });
-  }, [playT, sequence, centresByPeriod, index]);
+  }, [drawT, sequence, centresByPeriod, index, progress]);
+
+  // Leaving the projected range restores the model, so scrubbing back to a reported period does not
+  // strand the building half-built under a static paint that never runs.
+  useEffect(() => {
+    if (drawT !== null) return;
+    const viewer = viewerRef.current;
+    const model = modelRef.current;
+    if (!viewer || !model || !index || prevFrameRef.current === null) return;
+    prevFrameRef.current = null;
+    void showAllElements(viewer, model, index);
+  }, [drawT, index]);
 
   // ── locate in the cost plan, then paint ──
   // Re-runs on a new model, a period scrub, or a mode switch. It never touches the viewer
@@ -336,16 +406,17 @@ export function IfcTakeoff({
     const viewer = viewerRef.current;
     const model = modelRef.current;
     if (!viewer || !model || !measurement) return;
-    // Playback owns the model while it is running; the static paint would fight it for colour.
-    if (playT !== null) return;
+    // The sequence painter owns the model whenever it is drawing — during playback, and for any
+    // period past the origin. The static paint would fight it for colour.
+    if (drawT !== null) return;
 
     let cancelled = false;
 
     (async () => {
       try {
         const [cm, evm] = await Promise.all([
-          api.costMap(viewPeriod).catch(() => null),
-          api.costCentres(viewPeriod).catch(() => [] as CostCentreEvm[]),
+          api.costMap(dataPeriod).catch(() => null),
+          api.costCentres(dataPeriod).catch(() => [] as CostCentreEvm[]),
         ]);
         if (cancelled) return;
 
@@ -393,7 +464,7 @@ export function IfcTakeoff({
     return () => {
       cancelled = true;
     };
-  }, [measurement, viewPeriod, paintMode, index, playT]);
+  }, [measurement, viewPeriod, paintMode, index, drawT, progress]);
 
   const onPick = async (file: File | undefined) => {
     if (!file) return;
@@ -405,6 +476,22 @@ export function IfcTakeoff({
     ? (100 * report.measuredElements) / report.totalElements
     : null;
 
+  /** What the scrub position currently means. Drives the pill, the badge and the legend. */
+  const scrubTier = tierAt(Math.round(playT ?? viewPeriod), progress);
+  /**
+   * The error bar the UI is entitled to quote at the horizon being shown — read off the back-test the
+   * projection shipped with, never written into the caption by hand, so the two cannot drift apart.
+   */
+  const shownMae = (() => {
+    if (!progress || scrubTier === "measured") return null;
+    const h = Math.round(playT ?? viewPeriod) - progress.originPeriod;
+    return progress.accuracy.find((m) => m.predictor === "pace" && m.horizon === h)?.maePp ?? null;
+  })();
+  /** Longest measured horizon, for the extrapolated caption's "no measurement past here" claim. */
+  const lastMeasuredHorizon = progress
+    ? Math.max(0, ...progress.accuracy.filter((m) => m.predictor === "pace").map((m) => m.horizon))
+    : 0;
+
   return (
     <div className="modelview">
       <div className="card modelview-stage">
@@ -415,12 +502,22 @@ export function IfcTakeoff({
             <div className="scrub">
               <label htmlFor="takeoff-period" className="muted small">Period</label>
               {/* While a build sequence is loaded the slider scrubs the sequence itself, in quarter
-                  periods, so the construction can be stepped by hand as well as played. */}
+                  periods, so the construction can be stepped by hand as well as played.
+
+                  The track is banded: solid where the workbook reports, hatched where the projection
+                  carries a measured error bar, faint past that. The scrub position tells a QS which
+                  kind of number they are looking at before they read a word of the caption. */}
               <input
                 id="takeoff-period"
+                className={progress ? "scrub-forecast" : undefined}
+                style={progress ? {
+                  // Fractions of the track where each tier ends.
+                  "--measured-end": `${pctOf(progress.originPeriod, costMap.minPeriod, sliderMax)}%`,
+                  "--forecast-end": `${pctOf(Math.min(progress.backtestedThroughPeriod, sliderMax), costMap.minPeriod, sliderMax)}%`,
+                } as React.CSSProperties : undefined}
                 type="range"
                 min={costMap.minPeriod}
-                max={costMap.maxPeriod}
+                max={sliderMax}
                 step={playT !== null ? 0.25 : 1}
                 value={playT ?? viewPeriod}
                 onChange={(e) => {
@@ -432,9 +529,14 @@ export function IfcTakeoff({
                     setViewPeriod(v);
                   }
                 }}
-                aria-label={`Reporting period ${playT ?? viewPeriod}`}
+                aria-label={`Period ${playT ?? viewPeriod}${scrubTier === "measured" ? " (reported)" : scrubTier === "forecast" ? " (forecast)" : " (extrapolated)"}`}
               />
               <span className="mono small">{playT ?? viewPeriod}</span>
+              {scrubTier !== "measured" && (
+                <span className={`pill pill-sm ${scrubTier === "forecast" ? "pill-warn" : "pill-muted"}`}>
+                  {scrubTier === "forecast" ? "forecast" : "extrapolated"}
+                </span>
+              )}
             </div>
           )}
 
@@ -511,14 +613,36 @@ export function IfcTakeoff({
           )}
         </div>
 
-        {playT !== null && (
-          <p className="provenance-badge" data-sequence-readout>
-            <b>Period {Math.floor(playT)}</b> · {builtCount.toLocaleString()} of{" "}
-            {index?.mappedLocalIds.length.toLocaleString()} priced elements standing · coloured by
+        {drawT !== null && (
+          <p className="provenance-badge" data-sequence-readout data-tier={scrubTier}>
+            <b>Period {Math.floor(drawT)}</b> · {builtCount.toLocaleString()} of{" "}
+            {index?.mappedLocalIds.length.toLocaleString()} priced elements standing
+            {shellCount > 0 && <> · {shellCount.toLocaleString()} more might be</>} · coloured by
             each element&apos;s own cost centre.{" "}
-            <b>The order is assumed, the amounts are not:</b> the sheet records percent complete per
-            cost centre, never per element, so elements rise bottom-up within their trade while the
-            pace and the colour come from the workbook.
+            {scrubTier === "measured" ? (
+              <>
+                <b>The order is assumed, the amounts are not:</b> the sheet records percent complete
+                per cost centre, never per element, so elements rise bottom-up within their trade
+                while the pace and the colour come from the workbook.
+              </>
+            ) : scrubTier === "forecast" ? (
+              <>
+                <b>Forecast, not reported.</b> The workbook ends at period {progress?.originPeriod};
+                this is each centre&apos;s {progress?.method} carried forward. Back-tested on this
+                project&apos;s own history at this horizon:{" "}
+                {shownMae !== null ? <>mean error <b>±{shownMae.toFixed(1)} pp</b> of progress</> : "measured"}.
+                Solid work is projected to stand even at the pessimistic end; translucent work is
+                inside the band and may not be there by then.
+              </>
+            ) : (
+              <>
+                <b>Extrapolated — no error bar earned here.</b> Same arithmetic as the forecast, but
+                the workbook is only long enough to measure accuracy{" "}
+                {lastMeasuredHorizon > 0 && <>{lastMeasuredHorizon} periods</>} past period{" "}
+                {progress?.originPeriod}, so nothing validates this distance out. Read it as
+                &ldquo;where this pace leads&rdquo;, not as a date.
+              </>
+            )}
           </p>
         )}
 
@@ -536,6 +660,14 @@ export function IfcTakeoff({
               <i style={{ background: hex(unplacedLegend.color) }} aria-hidden="true" />
               {unplacedLegend.label}
             </span>
+            {/* Only while a projection is on screen: the opacity scale means nothing on a reported
+                period, where every standing element is equally solid. */}
+            {scrubTier !== "measured" && forecastLegend().map((l) => (
+              <span key={l.label} className="legend-item" title={l.note}>
+                <i style={{ background: hex(l.color), opacity: l.opacity }} aria-hidden="true" />
+                {l.label}
+              </span>
+            ))}
           </div>
         )}
 
@@ -647,9 +779,34 @@ export function IfcTakeoff({
                                   </div>
                                 </div>
                               </div>
+
+                              {/* This feature projects physical progress, and nothing else. The cost
+                                  figures above are the last ones actually measured — deriving EV or AC
+                                  from a projected percentage would manufacture a final-cost number
+                                  with none of the validation such a number needs. So they are labelled
+                                  rather than advanced. */}
+                              {scrubTier !== "measured" && (
+                                <p className="muted small">
+                                  Cost as at period {progress?.originPeriod}, the last measured one —
+                                  only <i>progress</i> is projected past it, never spend.
+                                  {item.bccId && progress?.finishByCentre.get(item.bccId) != null && (
+                                    <>
+                                      {" "}This centre reaches 100% around period{" "}
+                                      <b>{progress.finishByCentre.get(item.bccId)}</b> at{" "}
+                                      {progress.paceByCentre.get(item.bccId)?.toFixed(1)} pp/period.
+                                    </>
+                                  )}
+                                  {item.bccId && progress?.finishByCentre.get(item.bccId) == null && (
+                                    <> This centre has no recent pace, so no finish period is claimed for it.</>
+                                  )}
+                                </p>
+                              )}
+
                               <button
                                 className="btn btn-sm btn-primary"
-                                onClick={() => onSelectCentre?.(centre, viewPeriod)}
+                                // Clamped: the drawer reads period-scoped endpoints, and there are no
+                                // rows past the origin for it to read.
+                                onClick={() => onSelectCentre?.(centre, dataPeriod)}
                               >
                                 Open {centre.bccId}
                               </button>
@@ -657,7 +814,7 @@ export function IfcTakeoff({
                           ) : (
                             <p className="muted small">
                               Cost centre <span className="mono">{item.bccId ?? DASH}</span> carries
-                              no row at period {viewPeriod}.
+                              no row at period {dataPeriod}.
                             </p>
                           )}
                         </div>

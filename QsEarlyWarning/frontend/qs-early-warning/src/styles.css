@@ -518,6 +518,54 @@ tr.selected td { background: var(--accent-weak); box-shadow: inset 3px 0 0 var(-
 .scrub { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .scrub input[type="range"] { width: 130px; accent-color: var(--accent); cursor: pointer; }
 
+/* A scrubber that runs past the last reported period.
+   The track is banded so the scrub position itself says which kind of number is on screen: solid
+   accent where the workbook reports, amber where the projection carries a measured error bar, and
+   hollow past that where nothing validates it. A QS should be able to see they have left the data
+   without reading the caption — so this is not decoration either. */
+.scrub input[type="range"].scrub-forecast {
+  width: 190px;
+  -webkit-appearance: none; appearance: none;
+  height: 18px; background: transparent;
+}
+.scrub input[type="range"].scrub-forecast::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 3px;
+  background:
+    linear-gradient(to right,
+      var(--accent) 0 var(--measured-end),
+      rgba(217,154,28,.55) var(--measured-end) var(--forecast-end),
+      var(--border) var(--forecast-end) 100%);
+}
+.scrub input[type="range"].scrub-forecast::-moz-range-track {
+  height: 6px; border-radius: 3px;
+  background:
+    linear-gradient(to right,
+      var(--accent) 0 var(--measured-end),
+      rgba(217,154,28,.55) var(--measured-end) var(--forecast-end),
+      var(--border) var(--forecast-end) 100%);
+}
+.scrub input[type="range"].scrub-forecast::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; margin-top: -4px; border-radius: 50%;
+  background: var(--text); border: 2px solid var(--surface); cursor: pointer;
+}
+.scrub input[type="range"].scrub-forecast::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--text); border: 2px solid var(--surface); cursor: pointer;
+}
+.pill-sm { font-size: var(--fs-eyebrow); padding: 2px 7px; }
+
+/* The sequence readout takes the colour of the claim it is making: neutral for reported work, amber
+   for a back-tested forecast, hollow for extrapolation past anything measured. */
+.provenance-badge[data-tier="forecast"] {
+  background: rgba(217,154,28,.08); border-color: rgba(217,154,28,.32);
+  border-left: 3px solid var(--warn);
+}
+.provenance-badge[data-tier="extrapolated"] {
+  background: var(--surface-2); border-color: var(--border);
+  border-left: 3px dashed var(--muted);
+}
+
 /* ── Render harness (/?render=1) ──
    The stage a video is captured from. Fixed pixel size on purpose: the exporter sets the window to
    match, so frames need no scaling or cropping afterwards and text stays crisp at 1:1. */

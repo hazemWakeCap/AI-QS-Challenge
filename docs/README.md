@@ -31,6 +31,25 @@ assumptions and reconciliation before award, drill into which resource an over-r
 | 10 | Data Administration | *Governed CRUD over the underlying tables.* | [10-data-administration.md](10-data-administration.md) |
 | 11 | Multi-Tenant Security | *How is each project's data isolated per user?* | [11-multi-tenant-security.md](11-multi-tenant-security.md) |
 | 12 | IFC → BOQ Element Register | *Click an element: what does the bill say about it?* | [17-ifc-boq-element-map.md](17-ifc-boq-element-map.md) |
+| 13 | 3D Cost X-Ray | *Where in the building is the money, and where is it drifting?* | [21-3d-cost-xray.md](21-3d-cost-xray.md) |
+| 14 | IFC Take-off | *What would this model cost at our rates?* | [22-ifc-takeoff.md](22-ifc-takeoff.md) |
+| 15 | 4D Build Sequence | *Play the build, coloured by cost performance.* | [23-4d-build-sequence.md](23-4d-build-sequence.md) |
+| 16 | Forecast Build Sequence | *At this pace, when does the frame close — and which trade holds it open?* | [24-forecast-build-sequence.md](24-forecast-build-sequence.md) |
+
+### Read it end to end
+
+**[QS Cost — Feature Guide](../presentation/QS-Cost-Feature-Guide.pdf)** (68pp) covers all 19
+implemented features in one continuous read — a worked Tower X example for each, the endpoint
+behind it, and an honesty ledger of every directional claim. Source:
+[QS-Cost-Feature-Guide.md](QS-Cost-Feature-Guide.md); rebuild with
+`python3 tools/build_feature_pdf.py`. The matching 16-slide brief is
+`presentation/qs-cost-features.html` / `.pdf`.
+
+### Recommendations
+
+- [Final Session Readiness — Saturday 1 August](18-final-session-readiness.md) — what the judges
+  actually score, where we already clear the bar, where marks are leaking today, and the one thing
+  worth building in the 105-minute window.
 
 ### Deep dives
 
