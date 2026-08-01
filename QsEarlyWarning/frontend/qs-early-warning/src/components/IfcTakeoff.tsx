@@ -14,7 +14,7 @@ import {
 } from "../model/ifcPaint";
 import { elementAtPointer, showSelection } from "../model/ifcPick";
 import {
-  buildProgressIndex, buildSequence, frameAt, reachOf, tierAt,
+  buildProgressIndex, buildProjectedVerdicts, buildSequence, frameAt, reachOf, tierAt,
   type BuildSequence, type ProgressIndex, type SequenceFrame,
 } from "../model/ifcSequence";
 import { mapToZones, type ZoneMapResult } from "../model/ifcZoneMap";
@@ -492,6 +492,21 @@ export function IfcTakeoff({
   const centres = panel?.centres ?? [];
 
   /**
+   * What colours the model past the origin — the panel's own verdict, period by period.
+   *
+   * The whole prefetch rather than `panel` alone, because a frame straddling two periods reads the
+   * nearer one and playback crosses a boundary every four ticks. Indexing it once is what keeps the
+   * paint from asking a second opinion: before this, the model took its colour from the progress
+   * forecaster's origin alert and held it flat for the entire projection, so a centre that had
+   * recovered — BCC-STR-CON-205 at CPI 0.933 in period 12, 0.969 in period 13 — went on being drawn
+   * as drifting beside a KPI panel reading GREEN off the projected CPI. One source, one verdict.
+   */
+  const verdicts = useMemo(
+    () => (panelByPeriod ? buildProjectedVerdicts(panelByPeriod) : null),
+    [panelByPeriod],
+  );
+
+  /**
    * The period the *zone* register is read at, held at the origin.
    *
    * Separate from `dataPeriod` on purpose. `/api/v1/model/cost-map` rejects a period the workbook does
@@ -507,7 +522,7 @@ export function IfcTakeoff({
     const model = modelRef.current;
     if (!viewer || !model || !index || !sequence || !centresByPeriod || drawT === null) return;
 
-    const frame = frameAt(drawT, sequence, centresByPeriod, progress);
+    const frame = frameAt(drawT, sequence, centresByPeriod, progress, verdicts);
     setFrame(frame);
 
     // Serialised on purpose. An earlier version fired the paint and advanced `prevFrameRef`
@@ -521,7 +536,7 @@ export function IfcTakeoff({
         prevFrameRef.current = frame;
       })
       .catch(() => { /* a dropped frame must not poison the chain */ });
-  }, [drawT, sequence, centresByPeriod, index, progress]);
+  }, [drawT, sequence, centresByPeriod, index, progress, verdicts]);
 
   // Losing the sequence restores the model, so a reload cannot strand the building half-built under
   // a zone paint that knows nothing about which elements the last frame had hidden.
@@ -652,8 +667,8 @@ export function IfcTakeoff({
    */
   const reach = useMemo(() => {
     if (!selected || !sequence || !centresByPeriod || drawT === null) return null;
-    return reachOf(selected.localId, drawT, sequence, centresByPeriod, progress);
-  }, [selected, sequence, centresByPeriod, drawT, progress]);
+    return reachOf(selected.localId, drawT, sequence, centresByPeriod, progress, verdicts);
+  }, [selected, sequence, centresByPeriod, drawT, progress, verdicts]);
 
   const reachByBcc = useMemo(
     () => new Map((reach ?? []).map((r) => [r.bccId, r])),

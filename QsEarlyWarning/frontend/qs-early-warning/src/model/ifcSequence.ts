@@ -1,5 +1,5 @@
 import type {
-  CostCentreEvm, ProgressForecast, ProgressHorizonMetric, ProgressPoint,
+  CostCentreEvm, ProgressForecast, ProgressHorizonMetric, ProgressPoint, ProjectedPanel,
 } from "../api/client";
 import type { ElementMapIndex } from "./ifcElementMap";
 
@@ -27,6 +27,10 @@ import type { ElementMapIndex } from "./ifcElementMap";
  * element is never drawn like a built one: the band between the pessimistic and optimistic
  * projections is rendered as translucent geometry, so the uncertainty is in the picture rather than
  * in a caption beside it.
+ *
+ * <b>Colour past the origin comes from the projected EVM panel</b> — see {@link ProjectedVerdicts}.
+ * The alert a period shows and the CPI printed beside it are then one number read twice, not two
+ * verdicts that can disagree.
  */
 
 /** Bottom-up storey ranking. Anything unrecognised sorts last, so it never displaces real levels. */
@@ -133,6 +137,41 @@ export function buildProgressIndex(f: ProgressForecast): ProgressIndex {
   };
 }
 
+/**
+ * Per-period cost verdicts past the origin — `period → bccId → alertLevel`.
+ *
+ * <b>Why this exists.</b> The progress forecaster carries one alert per centre, the one it read at
+ * the origin, because progress is all it forecasts: a projected percentage on its own says nothing
+ * about cost. So every projected period was painted with the origin's verdict, frozen.
+ *
+ * That was defensible only while nothing else on the tab had an opinion. `EvmProjector` now states a
+ * cost position for each projected period — EV from the projected percentage, AC from the spend
+ * cone, CPI from the two — and the panel beside the model prints it. Leaving the paint on the origin
+ * alert put two verdicts about one centre on one screen: BCC-STR-CON-205 was AMBER at period 12 on
+ * CPI 0.933, recovers to 0.969 by period 13, and the model went on colouring it as drifting while
+ * the KPI panel a few pixels away read GREEN. The picture was wrong and the reader had no way to
+ * tell which half to believe.
+ *
+ * The panel is the one that knows, so the panel is what colours the model.
+ */
+export type ProjectedVerdicts = Map<number, Map<string, string>>;
+
+/**
+ * Indexes the prefetched panels by period and centre.
+ *
+ * Measured periods are included and harmless: `statesAt` reads the reported rows below the origin
+ * and never consults this, and the panel is a passthrough of those same rows anyway.
+ */
+export function buildProjectedVerdicts(
+  panelByPeriod: ReadonlyMap<number, ProjectedPanel>,
+): ProjectedVerdicts {
+  const out: ProjectedVerdicts = new Map();
+  for (const [period, panel] of panelByPeriod) {
+    out.set(period, new Map(panel.centres.map((c) => [c.bccId, c.alertLevel])));
+  }
+  return out;
+}
+
 /** The tier a period falls in, given the projection's own boundaries. */
 export function tierAt(period: number, progress: ProgressIndex | null): SequenceTier {
   if (!progress || period <= progress.originPeriod) return "measured";
@@ -164,14 +203,18 @@ export interface CentreState {
  * such thing as being 40% AMBER.
  *
  * Past `progress.originPeriod` the percentages come from the projection instead of the workbook, by
- * exactly the same interpolation. The alert is the one carried forward from the origin — see the
- * backend's `CentreProgressForecast.AlertAtOrigin` for why that is the honest choice rather than a
- * new "forecast" colour.
+ * exactly the same interpolation, and the alert comes from that period's projected EVM panel — the
+ * same verdict, off the same projected CPI, that the figures beside the model are printed from. It
+ * still carries no colour of its own: a projected AMBER centre is drawn amber, and what marks the
+ * frame as a projection is opacity, not hue. Without a panel for the period — before the prefetch
+ * lands, or for a centre the projector could not price — it falls back to the origin's verdict,
+ * which is the same fallback `EvmProjector` itself applies when AC is unavailable.
  */
 export function statesAt(
   t: number,
   centresByPeriod: Map<number, CostCentreEvm[]>,
   progress: ProgressIndex | null = null,
+  verdicts: ProjectedVerdicts | null = null,
 ): Map<string, CentreState> {
   const lo = Math.floor(t);
   const hi = Math.ceil(t);
@@ -213,9 +256,12 @@ export function statesAt(
     if (!a || !b) continue;
 
     // The measured rows still own the alert while `lo` is a reported period, so a frame straddling
-    // the boundary does not flip colour a beat early.
+    // the boundary does not flip colour a beat early. Past it the projected panel owns it, and the
+    // origin's verdict is only what is left when neither has anything to say.
     const measuredAlert = nearerByBcc.get(bccId)?.alertLevel;
-    const alertLevel = (nearer <= progress!.originPeriod ? measuredAlert : null)
+    const alertLevel = (nearer <= progress!.originPeriod
+        ? measuredAlert
+        : verdicts?.get(nearer)?.get(bccId))
       ?? progress!.alertByCentre.get(bccId)
       ?? measuredAlert
       ?? "";
@@ -277,8 +323,9 @@ export function frameAt(
   sequence: BuildSequence,
   centresByPeriod: Map<number, CostCentreEvm[]>,
   progress: ProgressIndex | null = null,
+  verdicts: ProjectedVerdicts | null = null,
 ): SequenceFrame {
-  const states = statesAt(t, centresByPeriod, progress);
+  const states = statesAt(t, centresByPeriod, progress, verdicts);
   const built = new Set<number>();
   const confident = new Set<number>();
   const shell = new Set<number>();
@@ -355,8 +402,9 @@ export function reachOf(
   sequence: BuildSequence,
   centresByPeriod: Map<number, CostCentreEvm[]>,
   progress: ProgressIndex | null = null,
+  verdicts: ProjectedVerdicts | null = null,
 ): CentreReach[] {
-  const states = statesAt(t, centresByPeriod, progress);
+  const states = statesAt(t, centresByPeriod, progress, verdicts);
   const out: CentreReach[] = [];
 
   for (const [bccId, ordered] of sequence) {

@@ -91,20 +91,37 @@ the interval is in the picture, not in a footnote beside it.
    period 10 → 0% at period 11); projecting it forward would delete work that physically exists.
    Such a centre reads **stalled** and is given no finish period at all — the honest answer, not a
    missing value.
-2. **The alert level is carried forward from the origin.** No cost verdict exists for a period that
-   has not happened. Carrying the last one forward is the same assumption the pace makes, so it
-   asserts nothing extra; inventing a "forecast" colour would assert less than the data supports.
-   Opacity, not hue, is what says *projected*.
+2. **The alert level is the projected one, from [feature 17](25-projected-evm.md).** This assumption
+   used to read *"carried forward from the origin"*, on the grounds that no cost verdict exists for a
+   period that has not happened. That stopped being true the moment `EvmProjector` shipped: it states
+   a CPI for every projected period, and the panel beside the model prints it. Carrying the origin's
+   verdict forward then put two answers about one centre on one screen — `BCC-STR-CON-205` closes
+   period 12 at CPI 0.933 and recovers to 0.969 by period 13, and the model went on painting it as
+   drifting while the KPI panel a few pixels away read GREEN.
+
+   It was wrong in the more dangerous direction far more often. Across all 173 centres at period 14,
+   the origin carries 32 AMBER and the projection 116: a centre trending into trouble stayed green on
+   the model all the way to the horizon. `BCC-STR-FWK-210` is one — GREEN at the origin, projected
+   AMBER from period 14 at CPI 0.846, and painted clean for every frame past it.
+
+   So the panel colours the model, per period. Where it has no verdict for a centre — before the
+   prefetch lands, or where AC is unavailable and there is no CPI to judge on — the origin's alert is
+   still the fallback, which is the same fallback `EvmProjector` applies internally. Hue remains cost
+   performance and nothing else; opacity, not colour, is what says *projected*.
 3. **The band past h=3 is scaled, not measured** — the h=3 quantiles widened by √(h/3). Scoring a
    horizon needs a reported period to score it against, and the panel does not reach that far.
    Every point it touches carries the `Extrapolated` tier.
 4. **The build order is inherited from feature 15** and remains an assumption: the sheet records
    percent complete per cost centre, never per element, so elements rise bottom-up within their
    trade.
-5. **No cost is forecast.** Progress and spend are different forecasts with different error
-   structures. Past the origin, CPI/BAC/EV/AC are shown at the last measured period and labelled as
-   such. Deriving EV or AC from a projected percentage would manufacture a final-cost number with
-   none of the validation such a number needs — see the honesty ledger row on EAC.
+5. **This feature forecasts no cost; [feature 17](25-projected-evm.md) does, and states its own
+   licence.** Progress and spend are different forecasts with different error structures, and nothing
+   here derives one from the other. What changed is that the figures beside the model are no longer
+   frozen at the origin: EV comes from the schema's own `BAC × pct` identity evaluated on the
+   projected percentage, AC from the incremental-spend cone or not at all, and PV and SPI stay null
+   because the baseline curve genuinely ends at the origin. The rule this assumption was written to
+   protect — that spend is never derived from progress — still holds exactly. See the honesty ledger
+   row on EAC.
 
 ## What it produces for Tower X
 

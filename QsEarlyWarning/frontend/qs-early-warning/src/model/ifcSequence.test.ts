@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { CostCentreEvm, ProgressForecast, ProgressPoint } from "../api/client";
+import type {
+  CostCentreEvm, ProgressForecast, ProgressPoint, ProjectedCentre, ProjectedPanel,
+} from "../api/client";
 import type { BuildSequence } from "./ifcSequence";
-import { buildProgressIndex, frameAt, reachOf, statesAt, tierAt } from "./ifcSequence";
+import {
+  buildProgressIndex, buildProjectedVerdicts, frameAt, reachOf, statesAt, tierAt,
+} from "./ifcSequence";
 
 /**
  * The sequence maths, including the projection past the last reported period.
@@ -32,6 +36,21 @@ const sequenceOf = (bccId: string, n = 10): BuildSequence =>
 
 const point = (period: number, p50: number, p10: number, p90: number, tier: ProgressPoint["tier"]): ProgressPoint =>
   ({ period, p50Pct: p50, p10Pct: p10, p90Pct: p90, tier });
+
+/**
+ * A projected EVM panel carrying nothing but what the painter reads off it.
+ *
+ * The rest of `ProjectedCentre` is the drawer's business — this module only ever asks a panel for a
+ * centre's verdict at a period, and pinning the fixture to that keeps the test honest about it.
+ */
+const panelOf = (period: number, verdicts: Record<string, string>): ProjectedPanel => ({
+  period, originPeriod: 12, horizonPeriod: 16,
+  backtestedThroughPeriod: 15, spendBacktestedThroughPeriod: 15,
+  basis: "Forecast", method: "test",
+  pvAvailable: false, pvReason: null, notes: [],
+  centres: Object.entries(verdicts).map(([bccId, alertLevel]) =>
+    ({ bccId, alertLevel, periodId: period } as ProjectedCentre)),
+});
 
 const forecastOf = (bccId: string, points: ProgressPoint[], opts?: Partial<ProgressForecast>): ProgressForecast => ({
   originPeriod: 12,
@@ -141,7 +160,9 @@ describe("projected periods", () => {
     expect(tierAt(16, progress)).toBe("extrapolated");
   });
 
-  it("carries the origin alert forward into projected periods", () => {
+  it("falls back to the origin alert when no panel has a verdict for the period", () => {
+    // The prefetch has not landed, or the projector could not price this centre. Holding the last
+    // known verdict is the same fallback EvmProjector applies when AC is unavailable.
     expect(statesAt(14, byPeriod, progress).get("BCC-A")!.alertLevel).toBe("AMBER");
   });
 
@@ -195,6 +216,74 @@ describe("certainty wins over doubt across trades", () => {
       [1, [centre("BCC-A", 100, "GREEN"), centre("BCC-B", 100, "AMBER")]],
     ]);
     expect(frameAt(1, seq, byPeriod).alertByLocalId.get(1)).toBe("AMBER");
+  });
+});
+
+/**
+ * The bug this block exists for.
+ *
+ * BCC-STR-CON-205 closes period 12 at CPI 0.933 — AMBER — and the projection has it recovering to
+ * 0.969 by period 13, which `/api/v1/forecast/panel` reports as GREEN. The take-off tab printed that
+ * GREEN in the KPI panel and went on painting the element amber, because the painter was reading the
+ * progress forecaster's origin alert and holding it flat across every projected period. Two verdicts
+ * about one centre, on one screen, with nothing to tell the reader which was right.
+ */
+describe("a projected period takes its verdict from the projected panel", () => {
+  const byPeriod = new Map<number, CostCentreEvm[]>([[12, [centre("BCC-A", 50, "AMBER")]]]);
+  const progress = buildProgressIndex(forecastOf("BCC-A", [
+    point(12, 50, 50, 50, "Measured"),
+    point(13, 60, 60, 60, "Forecast"),
+    point(14, 70, 70, 70, "Forecast"),
+  ]));
+  // Recovered at 13, back in trouble at 14 — the alert has to be able to move both ways.
+  const verdicts = buildProjectedVerdicts(new Map([
+    [12, panelOf(12, { "BCC-A": "AMBER" })],
+    [13, panelOf(13, { "BCC-A": "GREEN" })],
+    [14, panelOf(14, { "BCC-A": "AMBER" })],
+  ]));
+
+  it("clears a centre the projection has recovered, instead of holding the origin's amber", () => {
+    expect(statesAt(13, byPeriod, progress, verdicts).get("BCC-A")!.alertLevel).toBe("GREEN");
+  });
+
+  it("flags a centre the projection puts back in trouble", () => {
+    expect(statesAt(14, byPeriod, progress, verdicts).get("BCC-A")!.alertLevel).toBe("AMBER");
+  });
+
+  it("paints the model with the verdict, not just the panel text", () => {
+    const f = frameAt(13, sequenceOf("BCC-A"), byPeriod, progress, verdicts);
+    for (const localId of f.built) expect(f.alertByLocalId.get(localId)).toBe("GREEN");
+  });
+
+  it("attributes the same verdict when asked why one element is that colour", () => {
+    const seq = sequenceOf("BCC-A");
+    const frame = frameAt(13, seq, byPeriod, progress, verdicts);
+    for (const localId of frame.built) {
+      const driver = reachOf(localId, 13, seq, byPeriod, progress, verdicts).find((r) => r.driving);
+      expect(driver?.alertLevel).toBe(frame.alertByLocalId.get(localId));
+    }
+  });
+
+  it("still lets the measured row own a frame straddling the origin", () => {
+    // At t=12.4 the nearer period is 12, which the workbook reports. The panel is a passthrough of
+    // that row there, so both agree — but the reported row is the one that must answer.
+    expect(statesAt(12.4, byPeriod, progress, verdicts).get("BCC-A")!.alertLevel).toBe("AMBER");
+  });
+
+  it("keeps the origin alert for a centre the panel does not price", () => {
+    const partial = buildProjectedVerdicts(new Map([[13, panelOf(13, { "BCC-OTHER": "GREEN" })]]));
+    expect(statesAt(13, byPeriod, progress, partial).get("BCC-A")!.alertLevel).toBe("AMBER");
+  });
+
+  it("changes nothing about which elements stand", () => {
+    // Colour is the only thing this touches. The band, the shell and the built set are the
+    // projection's, and a verdict must not be able to move geometry.
+    const seq = sequenceOf("BCC-A");
+    const withPanel = frameAt(13, seq, byPeriod, progress, verdicts);
+    const without = frameAt(13, seq, byPeriod, progress);
+    expect([...withPanel.built].sort()).toEqual([...without.built].sort());
+    expect([...withPanel.shell].sort()).toEqual([...without.shell].sort());
+    expect([...withPanel.confident].sort()).toEqual([...without.confident].sort());
   });
 });
 
