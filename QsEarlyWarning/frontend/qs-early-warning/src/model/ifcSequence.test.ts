@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CostCentreEvm, ProgressForecast, ProgressPoint } from "../api/client";
 import type { BuildSequence } from "./ifcSequence";
-import { buildProgressIndex, frameAt, statesAt, tierAt } from "./ifcSequence";
+import { buildProgressIndex, frameAt, reachOf, statesAt, tierAt } from "./ifcSequence";
 
 /**
  * The sequence maths, including the projection past the last reported period.
@@ -213,5 +213,82 @@ describe("determinism", () => {
     expect([...a.built].sort()).toEqual([...b.built].sort());
     expect([...a.shell].sort()).toEqual([...b.shell].sort());
     expect([...a.confident].sort()).toEqual([...b.confident].sort());
+  });
+});
+
+describe("why an element is the colour it is", () => {
+  /**
+   * The case that sent a user looking for a bug that was not there.
+   *
+   * A slab is concrete AND soffit formwork, and the two trades run at their own pace. At period 8 on
+   * the real project the concrete centre has poured 151 of 299 slabs while the formwork centre has
+   * struck 106 — so 45 slabs sit bound to an AMBER formwork centre that has not reached them, and are
+   * painted by the GREEN concrete centre alone. Clicking one showed both centres and named neither as
+   * the source of the colour, which reads as the model disagreeing with the panel.
+   */
+  const twoTrades: BuildSequence = new Map([
+    ["BCC-CON", [1, 2, 3, 4]],
+    ["BCC-FWK", [1, 2, 3, 4]],
+  ]);
+  // Concrete has reached 3 of 4; formwork only 2 of 4.
+  const byPeriod = new Map<number, CostCentreEvm[]>([
+    [8, [centre("BCC-CON", 75, "GREEN"), centre("BCC-FWK", 50, "AMBER")]],
+  ]);
+
+  it("names the reaching centre the colour was taken from", () => {
+    // Element 1: both trades are on it, so the amber one wins and is the one to blame.
+    const first = reachOf(1, 8, twoTrades, byPeriod);
+    expect(first.map((r) => [r.bccId, r.reached, r.driving])).toEqual([
+      ["BCC-CON", true, false],
+      ["BCC-FWK", true, true],
+    ]);
+  });
+
+  it("marks a centre that has not reached the element, so its verdict is not read as the colour", () => {
+    // Element 3: poured but not yet struck. Amber centre listed, green element — the whole confusion.
+    const third = reachOf(3, 8, twoTrades, byPeriod);
+    expect(third.find((r) => r.bccId === "BCC-FWK")).toMatchObject({
+      reached: false, alertLevel: "AMBER", driving: false, position: 3, total: 4,
+    });
+    expect(third.find((r) => r.bccId === "BCC-CON")).toMatchObject({
+      reached: true, alertLevel: "GREEN", driving: true,
+    });
+  });
+
+  it("claims no driver for an element no centre has reached", () => {
+    const fourth = reachOf(4, 8, twoTrades, byPeriod);
+    expect(fourth.every((r) => !r.reached)).toBe(true);
+    expect(fourth.some((r) => r.driving)).toBe(false);
+  });
+
+  it("agrees with the colour frameAt actually paints, on every element", () => {
+    // The property that matters: this explains the painter, it does not form a second opinion.
+    const frame = frameAt(8, twoTrades, byPeriod);
+    for (const localId of [1, 2, 3, 4]) {
+      const driver = reachOf(localId, 8, twoTrades, byPeriod).find((r) => r.driving);
+      expect(driver?.alertLevel).toBe(frame.alertByLocalId.get(localId));
+    }
+  });
+
+  it("agrees with the painter past the origin too, where the band widens", () => {
+    const projected = new Map<number, CostCentreEvm[]>([[12, [centre("BCC-A", 50, "AMBER")]]]);
+    const progress = buildProgressIndex(forecastOf("BCC-A", [
+      point(12, 50, 50, 50, "Measured"),
+      point(13, 60, 55, 80, "Forecast"),
+    ]));
+    const seq = sequenceOf("BCC-A");
+    const frame = frameAt(13, seq, projected, progress);
+
+    for (let localId = 1; localId <= 10; localId++) {
+      const centres = reachOf(localId, 13, seq, projected, progress);
+      const driver = centres.find((r) => r.driving);
+      // Reach is read at the optimistic end, exactly as the painter colours it.
+      expect(centres[0].reached).toBe(frame.alertByLocalId.has(localId));
+      expect(driver?.alertLevel).toBe(frame.alertByLocalId.get(localId));
+    }
+  });
+
+  it("says nothing about a centre this element does not belong to", () => {
+    expect(reachOf(99, 8, twoTrades, byPeriod)).toEqual([]);
   });
 });

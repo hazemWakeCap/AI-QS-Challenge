@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  api, type CostCentreEvm, type CostMap, type TakeoffLineRequest, type TakeoffPricing,
+  api, type CostCentreEvm, type CostMap, type ProjectedCentre, type ProjectedPanel,
+  type TakeoffLineRequest, type TakeoffPricing,
 } from "../api/client";
 import { money, millions, ratio, DASH } from "../format";
 import { centreLegend, forecastLegend, hex } from "../model/costPaint";
@@ -13,7 +14,7 @@ import {
 } from "../model/ifcPaint";
 import { elementAtPointer, showSelection } from "../model/ifcPick";
 import {
-  buildProgressIndex, buildSequence, frameAt, tierAt,
+  buildProgressIndex, buildSequence, frameAt, reachOf, tierAt,
   type BuildSequence, type ProgressIndex, type SequenceFrame,
 } from "../model/ifcSequence";
 import { mapToZones, type ZoneMapResult } from "../model/ifcZoneMap";
@@ -65,8 +66,9 @@ export function IfcTakeoff({
 }: {
   period: number;
   /** Hands a cost centre to the app's shared drawer. The period travels with it: this tab scrubs
-   *  independently, so a drawer opened from period 6 must not show period 12 numbers. */
-  onSelectCentre?: (centre: CostCentreEvm, period: number) => void;
+   *  independently, so a drawer opened from period 6 must not show period 12 numbers — and one
+   *  opened from period 16 must not either. */
+  onSelectCentre?: (centre: ProjectedCentre, period: number) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<Viewer | null>(null);
@@ -85,7 +87,20 @@ export function IfcTakeoff({
   const [zoneMap, setZoneMap] = useState<ZoneMapResult | null>(null);
   const [links, setLinks] = useState<CostLinkResult | null>(null);
   const [index, setIndex] = useState<ElementMapIndex | null>(null);
-  const [centres, setCentres] = useState<CostCentreEvm[]>([]);
+  /**
+   * Every period's EVM panel — reported rows at or below the origin, projected past it.
+   *
+   * Fetched once for the whole timeline rather than per scrub position. Fetching on demand meant the
+   * figures arrived a round trip after the clock moved, so during ▶ Build the panel was permanently
+   * one period behind: the heading read "period 13" above period 12's CPI, with no projected caveat
+   * because a period-12 row is measured. Holding the series makes every read synchronous, which is the
+   * only way the heading and the figures can be guaranteed to name the same period. The whole set
+   * costs one parallel burst of ~25ms calls, and the measured half is a server-side passthrough.
+   */
+  const [panelByPeriod, setPanelByPeriod] = useState<Map<number, ProjectedPanel> | null>(null);
+  /** Every cost-centre code in the project, for element-name matching. Period-invariant, so fetched
+   *  once and held rather than re-read on every scrub and every playback step. */
+  const centreCodesRef = useRef<string[] | null>(null);
   const [selected, setSelected] = useState<ResolvedElement | null>(null);
 
   // ── 4D playback ──
@@ -94,9 +109,14 @@ export function IfcTakeoff({
   const [centresByPeriod, setCentresByPeriod] = useState<Map<number, CostCentreEvm[]> | null>(null);
   const [playT, setPlayT] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
-  const [builtCount, setBuiltCount] = useState(0);
-  /** How many more elements the projection's optimistic end reaches. Zero for measured periods. */
-  const [shellCount, setShellCount] = useState(0);
+  /**
+   * The frame currently on screen.
+   *
+   * Held as state rather than only in `prevFrameRef` because the side panel reads from it: the
+   * selected element's colour has to be quoted from the frame that actually painted it, not
+   * recomputed from the period and hoped to match.
+   */
+  const [frame, setFrame] = useState<SequenceFrame | null>(null);
   /**
    * Projected percent complete past the last reported period, so the sequence can run to topping out.
    *
@@ -104,6 +124,8 @@ export function IfcTakeoff({
    * the tab worked without a projection before this existed and must keep working without one.
    */
   const [progress, setProgress] = useState<ProgressIndex | null>(null);
+  /** Whether the projection has answered yet — null progress means "none available", not "not asked". */
+  const [progressResolved, setProgressResolved] = useState(false);
   /** Last drawn frame, so each tick only applies what actually changed. */
   const prevFrameRef = useRef<SequenceFrame | null>(null);
   /** Serialises frame paints — see the draw effect for why this cannot be fire-and-forget. */
@@ -116,7 +138,15 @@ export function IfcTakeoff({
 
   /** Period shown in this tab. Seeded from the app selector, then scrubbable in place. */
   const [viewPeriod, setViewPeriod] = useState(period);
-  useEffect(() => setViewPeriod(period), [period]);
+  useEffect(() => {
+    setViewPeriod(period);
+    // Leaving playback, not just re-seeding. The playback clock outranks the scrub position
+    // everywhere it is read, and nothing used to clear it — so once ▶ Build had run, the app's period
+    // selector was silently inert: the header could read "period 3" while the tab sat at topping out.
+    // Picking a period from the selector is an explicit instruction, and it wins.
+    setPlayT(null);
+    setPlaying(false);
+  }, [period]);
 
   /** Load → measure → price. */
   const ingest = useCallback(async (bytes: Uint8Array, name: string) => {
@@ -131,6 +161,11 @@ export function IfcTakeoff({
     setLinks(null);
     setIndex(null);
     setSelected(null);
+    // A new model binds a different set of centres, so the projection and every period's figures are
+    // re-derived rather than carried over from the file that was open before.
+    setProgress(null);
+    setProgressResolved(false);
+    setPanelByPeriod(null);
     indexRef.current = null;
     selectedRef.current = null;
     setFileName(name);
@@ -284,6 +319,22 @@ export function IfcTakeoff({
     return () => { cancelled = true; };
   }, [measurement]);
 
+  /**
+   * The cost centres this model actually reaches.
+   *
+   * Asking for all 173 would stretch the horizon to whichever centre is slowest project-wide — the
+   * eight structure centres the register binds top out inside nine periods, and that is the timeline
+   * worth showing here. Hoisted out of the sequence effect because the projected panel has to request
+   * the same set: two callers asking for different centres would get two different horizons, and the
+   * slider would then run past the periods the side panel has figures for.
+   */
+  const mappedBccIds = useMemo(() => index ? [...new Set(
+    index.mappedLocalIds
+      .flatMap((id) => index.byLocalId.get(id)?.items ?? [])
+      .map((i) => i.bccId)
+      .filter((b): b is string => Boolean(b)),
+  )] : [], [index]);
+
   // ── 4D: the build order, and every period's progress ──
   // Fetched once per model. The sequence is deterministic, so a video rendered twice is identical.
   useEffect(() => {
@@ -304,27 +355,52 @@ export function IfcTakeoff({
       setCentresByPeriod(new Map(rows));
       setSequence(buildSequence(index));
 
-      // Only the centres this model actually reaches. Asking for all 173 would stretch the horizon to
-      // whichever centre is slowest project-wide — the eight structure centres the register binds top
-      // out inside nine periods, and that is the timeline worth showing here.
-      const mapped = [...new Set(
-        index.mappedLocalIds
-          .flatMap((id) => index.byLocalId.get(id)?.items ?? [])
-          .map((i) => i.bccId)
-          .filter((b): b is string => Boolean(b)),
-      )];
-
       try {
-        const f = await api.progressForecast(mapped);
+        const f = await api.progressForecast(mappedBccIds);
         if (!cancelled) setProgress(buildProgressIndex(f));
       } catch {
         // No projection for this project. The sequence still plays the reported periods.
         if (!cancelled) setProgress(null);
       }
+      // Settled either way — the prefetch below waits on this rather than on `progress` being
+      // non-null, because "no projection" is a real answer and must not stall the figures forever.
+      if (!cancelled) setProgressResolved(true);
     })();
 
     return () => { cancelled = true; };
-  }, [index, costMap?.minPeriod, costMap?.maxPeriod]);
+  }, [index, mappedBccIds, costMap?.minPeriod, costMap?.maxPeriod]);
+
+  // ── every period's figures, up front ──
+  //
+  // Runs once the timeline's extent is known — which needs the projection, because the horizon is
+  // whatever it says rather than the last reported period. Periods that fail are simply absent from
+  // the map and the panel shows nothing for them, exactly as it does before the fetch lands.
+  const firstPeriod = costMap?.minPeriod;
+  const lastReportedPeriod = costMap?.maxPeriod;
+  useEffect(() => {
+    if (!mappedBccIds.length || firstPeriod === undefined || lastReportedPeriod === undefined) return;
+    if (!progressResolved) return;
+    const last = progress?.horizonPeriod ?? lastReportedPeriod;
+
+    let cancelled = false;
+    (async () => {
+      const periods: number[] = [];
+      for (let p = firstPeriod; p <= last; p++) periods.push(p);
+
+      const entries = await Promise.all(periods.map((p) =>
+        api.projectedPanel(p, mappedBccIds)
+          .then((r) => [p, r] as const)
+          .catch(() => null)));
+      if (cancelled) return;
+
+      setPanelByPeriod(new Map(entries.filter((e): e is readonly [number, ProjectedPanel] => e !== null)));
+    })();
+
+    return () => { cancelled = true; };
+    // Keyed on the timeline's *bounds*, never on `costMap` itself. The zone register is re-read each
+    // time the clock crosses a period, and each response is a fresh object — depending on it re-ran
+    // this whole prefetch on every step of a build, 21 calls at a time.
+  }, [mappedBccIds, progressResolved, progress?.horizonPeriod, firstPeriod, lastReportedPeriod]);
 
   // Advance the clock while playing.
   //
@@ -380,15 +456,51 @@ export function IfcTakeoff({
   const sliderMax = progress?.horizonPeriod ?? costMap?.maxPeriod ?? 12;
 
   /**
-   * The period every cost figure on this tab is read at — the scrub position, held at the origin once
-   * past it.
+   * The period every cost figure on this tab is read at — the clock position, unclamped.
    *
-   * The workbook has no rows beyond the origin, so CPI, EV, AC and the drawer all resolve to the last
-   * measured period. They are labelled as such where they appear, never advanced to match the
-   * projected period: this feature forecasts progress, and a projected percentage is not grounds for
-   * inventing a cost.
+   * This used to be held at the origin, on the grounds that a projected percentage is not grounds for
+   * inventing a cost. The narrower version of that rule is the one that actually holds: EV is
+   * *defined* by the schema as BAC × percent complete, so projecting the percentage projects the
+   * earned value by the database's own arithmetic. What may not be derived from progress is spend —
+   * and it is not: AC comes from the incremental-spend cone, or the row reports it unavailable and
+   * CPI, EAC and VAC go with it. PV and SPI stay null past the origin, because the baseline curve
+   * genuinely ends there. See EvmProjector on the server for the whole argument.
+   *
+   * <b>It reads `playT` too, and must.</b> An earlier version read only the scrub position, so ▶ Build
+   * advanced the model, the header and the tier pill while the cost figures sat at wherever the slider
+   * had been left. Playing from period 5 to topping out ended with the panel attributing an element to
+   * a centre "at period 21" beside that centre's period-5 CPI — and with no projected-basis caveat
+   * rendered, because a period-5 row *is* measured. Rounded, so a 0.25-step playback asks the server
+   * once per whole period rather than four times.
    */
-  const dataPeriod = progress ? Math.min(viewPeriod, progress.originPeriod) : viewPeriod;
+  /**
+   * The whole period the clock is standing in — the single answer to "which period is this?".
+   *
+   * There were three answers before: `Math.round` for the tier pill, `Math.floor` for the element
+   * attribution, and the raw scrub for the figures. At a fractional playback position they disagreed,
+   * so at clock 16.5 the panel attributed an element "at period 16" beside cost figures for 17.
+   * Rounding is the convention because it matches where the sequence flips from measured to projected
+   * geometry; what matters more is that there is only one of it.
+   */
+  const clockPeriod = Math.round(playT ?? viewPeriod);
+
+  const dataPeriod = clockPeriod;
+
+  /** The figures on screen. A synchronous lookup, so they can never name a different period than the
+   *  heading above them; null only before the prefetch lands. */
+  const panel = panelByPeriod?.get(dataPeriod) ?? null;
+  const centres = panel?.centres ?? [];
+
+  /**
+   * The period the *zone* register is read at, held at the origin.
+   *
+   * Separate from `dataPeriod` on purpose. `/api/v1/model/cost-map` rejects a period the workbook does
+   * not reach, and this response carries three things the tab cannot lose: the zone list the model is
+   * painted against, and `minPeriod`/`maxPeriod`, which set the slider's own bounds. Letting the scrub
+   * drive it would collapse the slider the moment you scrubbed past 12. The zone list is the cost
+   * plan's spatial register anyway — it does not move with time.
+   */
+  const zonePeriod = progress ? Math.min(dataPeriod, progress.originPeriod) : dataPeriod;
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -396,8 +508,7 @@ export function IfcTakeoff({
     if (!viewer || !model || !index || !sequence || !centresByPeriod || drawT === null) return;
 
     const frame = frameAt(drawT, sequence, centresByPeriod, progress);
-    setBuiltCount(frame.builtCount);
-    setShellCount(frame.shellCount);
+    setFrame(frame);
 
     // Serialised on purpose. An earlier version fired the paint and advanced `prevFrameRef`
     // immediately, so if a paint was still in flight the next frame's delta was computed against a
@@ -438,14 +549,24 @@ export function IfcTakeoff({
 
     (async () => {
       try {
-        const [cm, evm] = await Promise.all([
-          api.costMap(dataPeriod).catch(() => null),
-          api.costCentres(dataPeriod).catch(() => [] as CostCentreEvm[]),
+        // Two calls, two lifetimes. The zone register is read at the origin — it would 400 past it —
+        // and follows the clock only because its per-zone costs do. The full centre-code list feeds
+        // nothing but name matching, and the *set* of centres is identical in every period, so it is
+        // fetched once per model and held; re-reading it on every playback step was 20 identical round
+        // trips per build. The EVM figures are not here at all — they are prefetched for the whole
+        // timeline above, so that scrubbing and playback read them without waiting.
+        const [cm, all] = await Promise.all([
+          api.costMap(zonePeriod).catch(() => null),
+          centreCodesRef.current
+            ? Promise.resolve(centreCodesRef.current)
+            : api.costCentres().then((r) => {
+                centreCodesRef.current = r.flatMap((c) => [c.bccId, c.packageCode]).filter(Boolean);
+                return centreCodesRef.current;
+              }).catch(() => [] as string[]),
         ]);
         if (cancelled) return;
 
         setCostMap(cm);
-        setCentres(evm);
         const zones = cm?.zones ?? [];
 
         const zm = mapToZones(
@@ -460,7 +581,7 @@ export function IfcTakeoff({
           zoneCodes: zones.map((z) => z.zoneCode),
           // Both identifiers a cost centre is known by — an element naming either one was authored
           // with this cost plan in view, even when it names no zone we could paint it into.
-          centreCodes: evm.flatMap((c) => [c.bccId, c.packageCode]).filter(Boolean),
+          centreCodes: all,
         }));
       } catch (e) {
         if (!cancelled) setErr(String((e as Error).message ?? e));
@@ -470,7 +591,7 @@ export function IfcTakeoff({
     return () => {
       cancelled = true;
     };
-  }, [measurement, dataPeriod]);
+  }, [measurement, zonePeriod]);
 
   // ── paint, when the sequence is not the one doing it ──
   //
@@ -515,14 +636,38 @@ export function IfcTakeoff({
     : null;
 
   /** What the scrub position currently means. Drives the pill, the badge and the legend. */
-  const scrubTier = tierAt(Math.round(playT ?? viewPeriod), progress);
+  const scrubTier = tierAt(clockPeriod, progress);
+
+  /**
+   * Why the selected element is the colour it is.
+   *
+   * An element is coloured by the worst of the centres that have <i>reached</i> it, and the two are
+   * not the same list: at period 8, 151 of 299 slabs are poured and only 106 of them struck, so
+   * slabs 107–151 carry an AMBER formwork centre that has not got to them and are painted by the
+   * GREEN concrete centre alone. Without this the panel listed both centres, said nothing about
+   * which was on screen, and a green centre sat beside an amber element with no way to reconcile
+   * them.
+   *
+   * Computed on selection, not per frame — see `reachOf`.
+   */
+  const reach = useMemo(() => {
+    if (!selected || !sequence || !centresByPeriod || drawT === null) return null;
+    return reachOf(selected.localId, drawT, sequence, centresByPeriod, progress);
+  }, [selected, sequence, centresByPeriod, drawT, progress]);
+
+  const reachByBcc = useMemo(
+    () => new Map((reach ?? []).map((r) => [r.bccId, r])),
+    [reach],
+  );
+  /** The centre the colour was actually taken from, if any centre has reached this element yet. */
+  const driver = reach?.find((r) => r.driving) ?? null;
   /**
    * The error bar the UI is entitled to quote at the horizon being shown — read off the back-test the
    * projection shipped with, never written into the caption by hand, so the two cannot drift apart.
    */
   const shownMae = (() => {
     if (!progress || scrubTier === "measured") return null;
-    const h = Math.round(playT ?? viewPeriod) - progress.originPeriod;
+    const h = clockPeriod - progress.originPeriod;
     return progress.accuracy.find((m) => m.predictor === "pace" && m.horizon === h)?.maePp ?? null;
   })();
   /**
@@ -664,9 +809,11 @@ export function IfcTakeoff({
         {drawT !== null && (
           <details className="readout" data-sequence-readout data-tier={scrubTier}>
             <summary>
-              <b>Period {Math.floor(drawT)}</b> · {builtCount.toLocaleString()} of{" "}
+              <b>Period {clockPeriod}</b> · {(frame?.builtCount ?? 0).toLocaleString()} of{" "}
               {index?.mappedLocalIds.length.toLocaleString()} standing
-              {shellCount > 0 && <> · {shellCount.toLocaleString()} might be</>}
+              {(frame?.shellCount ?? 0) > 0 && (
+                <> · {frame!.shellCount.toLocaleString()} might be</>
+              )}
               {scrubTier === "measured" && <> · <b>reported</b></>}
               {scrubTier === "forecast" && (
                 <> · <b>forecast</b>{shownMae !== null && <> ±{shownMae.toFixed(1)} pp</>}</>
@@ -808,13 +955,54 @@ export function IfcTakeoff({
                 ) : (
                   <>
                     <h4>In the bill</h4>
+
+                    {/* Why this element is the colour it is.
+                        The panel used to list an element's centres and leave the reader to guess
+                        which one the model had painted from — so an amber slab beside a GREEN
+                        concrete centre read as a contradiction rather than as the formwork centre
+                        doing its job. The colour is stated, attributed, and the centres that are not
+                        responsible for it are marked as such below. */}
+                    {drawT !== null && reach && reach.length > 0 && (
+                      <p className="muted small">
+                        {driver ? (
+                          <>
+                            Drawn from <span className="mono">{driver.bccId}</span> (
+                            <b>{driver.alertLevel}</b>) at period {clockPeriod} — the worst
+                            verdict among the {reach.filter((r) => r.reached).length} of{" "}
+                            {reach.length} centres that have reached this element.
+                          </>
+                        ) : (
+                          <>
+                            No centre has reached this element at period {clockPeriod}, so
+                            nothing below is colouring it.
+                          </>
+                        )}
+                      </p>
+                    )}
+
                     {selected.items.map((item) => {
                       const centre = centres.find((c) => c.bccId === item.bccId);
+                      const at = item.bccId ? reachByBcc.get(item.bccId) : undefined;
                       return (
                         <div key={item.boqItemRef} className="detail-section">
                           <div>
                             <span className="mono">{item.boqItemRef}</span>
                             <span className="muted small"> · {item.description}</span>
+                            {at?.driving && (
+                              // Blue, not green or amber: this marks which centre the colour came
+                              // from, and must not itself read as a cost verdict.
+                              <span className="pill pill-sm pill-blue" title="this element takes its colour from this centre">
+                                {" "}colours it
+                              </span>
+                            )}
+                            {at && !at.reached && (
+                              <span
+                                className="pill pill-sm pill-muted"
+                                title={`this centre has reached ${at.position - 1} of its ${at.total} elements, and this one is number ${at.position}`}
+                              >
+                                {" "}not here yet
+                              </span>
+                            )}
                           </div>
                           <div className="muted small">
                             {item.unitRate.toLocaleString(undefined, { maximumFractionDigits: 2 })}{" "}
@@ -827,8 +1015,23 @@ export function IfcTakeoff({
                               <div className="kpis kpis-2">
                                 <div className="kpi">
                                   <div className="kpi-v">{ratio(centre.cpi)}</div>
-                                  <div className="kpi-l">CPI</div>
-                                  <div className="kpi-sub">{centre.alertLevel}</div>
+                                  <div className="kpi-l">
+                                    CPI
+                                    {centre.basis !== "Measured" && (
+                                      <span
+                                        className={`pill pill-sm ${centre.basis === "Forecast" ? "pill-blue" : "pill-muted"}`}
+                                        title={centre.basis === "Forecast"
+                                          ? "Both the progress and spend projections behind this figure carry a measured error bar."
+                                          : "Past at least one projection's back-tested horizon — same arithmetic, unmeasured accuracy."}
+                                      >
+                                        {" "}{centre.basis.toLowerCase()}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="kpi-sub">
+                                    {centre.alertLevel}
+                                    {centre.alertProjected && " (projected)"}
+                                  </div>
                                 </div>
                                 <div className="kpi">
                                   <div className="kpi-v">
@@ -837,28 +1040,69 @@ export function IfcTakeoff({
                                   <div className="kpi-l">budget at completion</div>
                                   <div className="kpi-sub">
                                     EV {millions(centre.ev, pricing?.currency ?? "AED")} · AC{" "}
-                                    {millions(centre.ac, pricing?.currency ?? "AED")}
+                                    {centre.ac === null
+                                      ? DASH
+                                      : millions(centre.ac, pricing?.currency ?? "AED")}
                                   </div>
                                 </div>
                               </div>
 
-                              {/* This feature projects physical progress, and nothing else. The cost
-                                  figures above are the last ones actually measured — deriving EV or AC
-                                  from a projected percentage would manufacture a final-cost number
-                                  with none of the validation such a number needs. So they are labelled
-                                  rather than advanced. */}
-                              {scrubTier !== "measured" && (
-                                <p className="muted small">
-                                  Cost as at period {progress?.originPeriod}, the last measured one —
-                                  only <i>progress</i> is projected past it, never spend.
-                                  {item.bccId && progress?.finishByCentre.get(item.bccId) != null && (
+                              {/* The band, shown only where the figures are projected. A projected
+                                  number without its interval invites being read as a measurement,
+                                  which is precisely what it is not. */}
+                              {centre.basis !== "Measured" && (
+                                <div className="muted small">
+                                  {centre.pctP10 != null && centre.pctP90 != null && (
                                     <>
-                                      {" "}This centre reaches 100% around period{" "}
-                                      <b>{progress.finishByCentre.get(item.bccId)}</b> at{" "}
-                                      {progress.paceByCentre.get(item.bccId)?.toFixed(1)} pp/period.
+                                      Progress {centre.pctComplete.toFixed(0)}% (
+                                      {centre.pctP10.toFixed(0)}–{centre.pctP90.toFixed(0)}%)
                                     </>
                                   )}
-                                  {item.bccId && progress?.finishByCentre.get(item.bccId) == null && (
+                                  {centre.acP10 != null && centre.acP90 != null && (
+                                    <>
+                                      {" · "}AC {millions(centre.acP10, pricing?.currency ?? "AED")}–
+                                      {millions(centre.acP90, pricing?.currency ?? "AED")}
+                                    </>
+                                  )}
+                                  {centre.eac != null && (
+                                    <>
+                                      {" · "}forecast final cost{" "}
+                                      <b>{millions(centre.eac, pricing?.currency ?? "AED")}</b>
+                                      {/* The full amount, not millions: a variance can be a few tens
+                                          of thousands, and "over by 0.0M" says nothing. */}
+                                      {centre.vac != null && (
+                                        <> ({centre.vac < 0 ? "over" : "under"} by{" "}
+                                        {money(Math.abs(centre.vac), pricing?.currency ?? "AED")})</>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* What stands behind the figures above.
+                                  These used to be frozen at the origin and labelled as such, on the
+                                  grounds that a projected percentage is no licence to invent a cost.
+                                  The narrower rule is the one that holds: EV is *defined* as BAC ×
+                                  percent complete, so projecting the percentage projects EV by the
+                                  schema's own arithmetic. Spend is a separate forecast and stays one —
+                                  where it has nothing to say, AC and everything downstream of it read
+                                  as unavailable rather than being derived from progress. */}
+                              {centre.basis !== "Measured" && (
+                                <p className="muted small">
+                                  Projected at period {centre.periodId}: EV from projected progress, AC
+                                  from the spend forecast.
+                                  {!centre.acAvailable && centre.acNote && <> {centre.acNote}</>}
+                                  {centre.acAvailable && centre.acNote && <> {centre.acNote}</>}
+                                  {" "}No PV or SPI — the baseline curve ends at period{" "}
+                                  {panel?.originPeriod ?? progress?.originPeriod}.
+                                  {centre.projectedFinishPeriod != null && (
+                                    <>
+                                      {" "}This centre reaches 100% around period{" "}
+                                      <b>{centre.projectedFinishPeriod}</b> at{" "}
+                                      {centre.pacePctPerPeriod.toFixed(1)} pp/period.
+                                    </>
+                                  )}
+                                  {centre.projectedFinishPeriod == null && (
                                     <> This centre has no recent pace, so no finish period is claimed for it.</>
                                   )}
                                 </p>
@@ -866,8 +1110,7 @@ export function IfcTakeoff({
 
                               <button
                                 className="btn btn-sm btn-primary"
-                                // Clamped: the drawer reads period-scoped endpoints, and there are no
-                                // rows past the origin for it to read.
+                                // Unclamped: the drawer now reads a projected row, and says so.
                                 onClick={() => onSelectCentre?.(centre, dataPeriod)}
                               >
                                 Open {centre.bccId}

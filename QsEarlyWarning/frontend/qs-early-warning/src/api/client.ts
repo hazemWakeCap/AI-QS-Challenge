@@ -97,6 +97,36 @@ export interface ProgressHorizonMetric { predictor: string; horizon: number; n: 
 export interface ProgressBand { horizon: number; p10: number; p90: number; n: number; }
 export interface ProgressValidation { provenance: string; originMin: number; originMax: number; centres: number; metrics: ProgressHorizonMetric[]; bands: ProgressBand[]; notes: string[]; }
 export interface ProgressForecast { originPeriod: number; horizonPeriod: number; backtestedThroughPeriod: number; suggestedHorizonPeriod: number; method: string; centres: CentreProgress[]; validation: ProgressValidation; }
+// Projected EVM panel — a cost-centre row at any period, measured or projected.
+//
+// Unlike the progress projection above, this DOES carry cost. The licence is the schema's own
+// definition of earned value (ev_amount = actual_pct_complete / 100 * bac_amount): projecting the
+// percentage projects EV by the same arithmetic the database performs, which is not a second cost
+// model. AC is never derived that way — it comes from the incremental-spend cone, or `acAvailable`
+// is false and the cost figures are null rather than guessed. `pv` and `spi` are null past the
+// origin because the baseline curve ends there.
+export type ProjectionBasis = "Measured" | "Forecast" | "Extrapolated";
+/** All a painter or a "worst wins" rollup needs — satisfied by a reported row and a projected one alike. */
+export type CentreVerdict = { bccId: string; alertLevel: string };
+/** A superset of CostCentreEvm, so the cost-centre drawer consumes a projected row unchanged. */
+export interface ProjectedCentre extends Omit<CostCentreEvm, "pv" | "ac" | "cpi" | "eac" | "vac"> {
+  periodId: number; basis: ProjectionBasis;
+  pctComplete: number; pctP10: number | null; pctP90: number | null;
+  evP10: number | null; evP90: number | null;
+  ac: number | null; acP10: number | null; acP90: number | null;
+  acAvailable: boolean; acNote: string | null;
+  cv: number | null; cpi: number | null; eac: number | null; vac: number | null;
+  pv: number | null; plannedPct: number | null;
+  alertProjected: boolean;
+  projectedFinishPeriod: number | null; pacePctPerPeriod: number; stalled: boolean;
+}
+export interface ProjectedPanel {
+  period: number; originPeriod: number; horizonPeriod: number;
+  backtestedThroughPeriod: number; spendBacktestedThroughPeriod: number;
+  basis: ProjectionBasis; method: string;
+  pvAvailable: boolean; pvReason: string | null;
+  notes: string[]; centres: ProjectedCentre[];
+}
 // idea-3 Estimate Assumption Stress Test
 export interface ReconciliationFailure { scope: string; check: string; line: string | null; actual: number; expected: number; delta: number; tolerance: number; }
 export interface ReconciliationItem { scope: string; quantityReDerivationOk: boolean; resourceCostIdentityOk: boolean; repeatedContractAmtConsistent: boolean; directTieOutOk: boolean; contractUpliftOk: boolean; directTieOutDelta: number; contractUpliftDelta: number; failures: ReconciliationFailure[]; }
@@ -320,6 +350,14 @@ export const api = {
     if (through !== undefined) q.set("through", String(through));
     const s = q.toString();
     return get<ProgressForecast>(`/api/v1/forecast/progress${s ? `?${s}` : ""}`);
+  },
+  // The EVM panel at any period, measured or projected. At or below the origin this returns the same
+  // figures as `costCentres` — one shape either side of the boundary, so a caller reading a scrubbed
+  // period never has to branch on whether the workbook reaches it.
+  projectedPanel: (period: number, bccIds?: string[]) => {
+    const q = new URLSearchParams({ period: String(period) });
+    if (bccIds?.length) q.set("bcc", bccIds.join(","));
+    return get<ProjectedPanel>(`/api/v1/forecast/panel?${q.toString()}`);
   },
   // idea-3 stress test
   stressReconciliation: () => get<Reconciliation>("/api/v1/stress-test/reconciliation"),

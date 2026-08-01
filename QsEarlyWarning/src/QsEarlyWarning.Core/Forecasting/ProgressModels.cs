@@ -7,9 +7,19 @@ namespace QsEarlyWarning.Core.Forecasting;
 /// <b>This forecasts progress, not money.</b> The idea-2 forecaster in this same namespace projects
 /// incremental spend (ΔAC); it says nothing about how much of a cost centre physically stands. The 4D
 /// sequence reveals geometry from <c>Actual_Pct_Complete</c>, so extending it past the origin needs a
-/// projection of that percentage and nothing else. No EV, AC, CPI or EAC is derived here, and none
-/// should be derived downstream from these numbers: a physical-progress projection is not a licence to
-/// invent cost figures.
+/// projection of that percentage and nothing else. No EV, AC, CPI or EAC is derived here.
+///
+/// <b>What may be derived downstream, and what may not.</b> This rule was once stated as "no cost
+/// figure of any kind", which is broader than the argument supports. EV is not an independent
+/// quantity: the schema defines it as <c>ev_amount = round(actual_pct_complete / 100.0 * bac_amount, 2)</c>
+/// (<c>0002_schema.sql</c>). Evaluating that identity on a projected percentage yields a projected EV
+/// by the database's own arithmetic, which is a restatement rather than a second model.
+///
+/// <b>AC is the line.</b> Actual cost may never be derived from these percentages — spend is a
+/// separate forecast with a different error structure, and it lives in
+/// <see cref="IncrementalSpendForecaster"/>. A consumer that wants CPI or EAC past the origin must
+/// take AC from there, or report it unavailable and take CPI and EAC down with it.
+/// <see cref="EvmProjector"/> is the one place that composition happens.
 /// </summary>
 public enum ProgressTier
 {

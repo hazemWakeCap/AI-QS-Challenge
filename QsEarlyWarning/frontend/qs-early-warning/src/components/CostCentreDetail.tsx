@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type CostCentreEvm, type CopilotEvidence, type CentreForecast } from "../api/client";
+import { api, type CostCentreEvm, type CopilotEvidence, type CentreForecast, type ProjectedCentre } from "../api/client";
 import { money as fmtMoney, ratio, pct } from "../format";
 import { Spinner } from "./Loading";
 import { VarianceCard } from "./VarianceCard";
@@ -9,11 +9,17 @@ import { CorrectionForecast, type ParsedScenario } from "./CorrectionForecast";
 // Per-cost-centre inspector rendered inside the right-side Drawer (mirrors the watchlist → VarianceCard
 // flow). Every centre shows the KPI panel; an AMBER centre (CPI < 0.95) additionally gets the drift
 // attribution (reused VarianceCard) and AI-generated correction actions.
-export function CostCentreDetail({ centre, period, currency = "AED" }: { centre: CostCentreEvm; period: number; currency?: string }) {
+/** A projected row announces itself with `basis`; a reported one has no such field. */
+function projectionOf(centre: CostCentreEvm | ProjectedCentre): ProjectedCentre | null {
+  return "basis" in centre && centre.basis !== "Measured" ? centre : null;
+}
+
+export function CostCentreDetail({ centre, period, currency = "AED" }: { centre: CostCentreEvm | ProjectedCentre; period: number; currency?: string }) {
   const money = (v: number | null | undefined) => fmtMoney(v, currency);
   const isAmber = centre.alertLevel.toUpperCase() === "AMBER";
   const cpiBad = centre.cpi != null && centre.cpi < 0.95;
   const vacBad = centre.vac != null && centre.vac < 0;
+  const projected = projectionOf(centre);
 
   return (
     <div>
@@ -23,11 +29,30 @@ export function CostCentreDetail({ centre, period, currency = "AED" }: { centre:
         <span className="muted small">{centre.discipline ?? "—"} · {centre.packageCode}</span>
       </div>
 
+      {/* Opened from a scrubbed period the workbook does not reach. Everything below is a projection,
+          and the panel says so once, at the top, rather than qualifying each figure. */}
+      {projected && (
+        <p className="muted small" style={{ marginTop: 8 }}>
+          <b>Period {projected.periodId} — {projected.basis.toLowerCase()}.</b>{" "}
+          EV is this centre&apos;s budget at its projected percent complete; AC comes from the spend
+          forecast{projected.acNote ? ` (${projected.acNote.replace(/\.$/, "")})` : ""}. PV and SPI are
+          blank: the baseline curve ends at the last reported period, so there is no plan past it to
+          compare against.
+          {projected.projectedFinishPeriod != null && (
+            <> This centre reaches 100% around period <b>{projected.projectedFinishPeriod}</b> at{" "}
+            {projected.pacePctPerPeriod.toFixed(1)} pp/period.</>
+          )}
+        </p>
+      )}
+
       {/* progress lane: planned vs actual % complete */}
       <div className="kpis">
         <div className="kpi"><div className="kpi-v">{money(centre.bac)}</div><div className="kpi-l">BAC (budget)</div></div>
         <div className="kpi"><div className="kpi-v">{pct(centre.plannedPct)}</div><div className="kpi-l">Plan % complete</div></div>
-        <div className="kpi"><div className="kpi-v">{pct(centre.actualPct)}</div><div className="kpi-l">Actual % complete</div></div>
+        {/* On a projected row the percentage is the projection, not a reported actual — the DTO keeps
+            them under different names so nothing downstream can mistake one for the other, and the
+            banner above has already said which this is. */}
+        <div className="kpi"><div className="kpi-v">{pct(projected ? projected.pctComplete : centre.actualPct)}</div><div className="kpi-l">{projected ? "Projected % complete" : "Actual % complete"}</div></div>
         <div className="kpi"><div className="kpi-v">{pct(centre.pctBudgetConsumed)}</div><div className="kpi-l">Budget consumed</div></div>
       </div>
 
@@ -51,10 +76,25 @@ export function CostCentreDetail({ centre, period, currency = "AED" }: { centre:
         <>
           <div className="detail-section">
             <h3>What&apos;s driving the drift</h3>
+            {/* Attribution splits a reported variance across resource lines. A projected period has no
+                such lines to split, so the card degrades on its own — the note here says why, rather
+                than leaving "not diagnosable" to read as a fault. */}
+            {projected && (
+              <p className="muted small">
+                Attribution needs reported resource lines, and period {projected.periodId} has none yet.
+                The last diagnosable period is shown below if one is available.
+              </p>
+            )}
             <VarianceCard bcc={centre.bccId} period={period} currency={currency} />
           </div>
           <div className="detail-section">
             <h3>Correction actions</h3>
+            {projected && (
+              <p className="muted small">
+                Anchored at the last reported period — a correction is proposed against measured spend,
+                not against a projection of it.
+              </p>
+            )}
             <CorrectionActions centre={centre} period={period} currency={currency} />
           </div>
         </>
@@ -112,7 +152,7 @@ function parseScenarios(answer: string): { scenarios: ParsedScenario[] | null; p
 // output cap): (1) the prose actions narrated by tested tools, shown with their source trail; (2) a
 // compact JSON-only estimate of each action's overrun-reduction. We pair (2) with the real forecast
 // engine's no-action baseline (api.forecastCone) to draw a 3-month what-if chart + table.
-function CorrectionActions({ centre, period, currency }: { centre: CostCentreEvm; period: number; currency: string }) {
+function CorrectionActions({ centre, period, currency }: { centre: CostCentreEvm | ProjectedCentre; period: number; currency: string }) {
   const [prose, setProse] = useState<string | null>(null);
   const [scenarios, setScenarios] = useState<ParsedScenario[] | null>(null);
   const [baseline, setBaseline] = useState<CentreForecast | null>(null);

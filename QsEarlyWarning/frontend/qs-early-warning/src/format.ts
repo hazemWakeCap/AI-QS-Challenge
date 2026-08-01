@@ -11,10 +11,16 @@ export function money(value: number | null | undefined, currency = "AED"): strin
   return `${INT.format(Math.round(value))} ${currency}`;
 }
 
+/** Compact millions with no currency label (e.g. "12.4M"), for lines that name it once. */
+export function millionsBare(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return DASH;
+  return `${(value / 1e6).toFixed(1)}M`;
+}
+
 /** Compact millions (e.g. "12.4M AED"). null/NaN → dash. */
 export function millions(value: number | null | undefined, currency = "AED"): string {
-  if (value == null || !Number.isFinite(value)) return DASH;
-  return `${(value / 1e6).toFixed(1)}M ${currency}`;
+  const bare = millionsBare(value);
+  return bare === DASH ? DASH : `${bare} ${currency}`;
 }
 
 /** CPI/SPI-style ratio to 3 dp. null/NaN → dash. */

@@ -11,19 +11,36 @@ import type { Viewer } from "./viewer";
 
 const MODEL_ID = "ifc-takeoff-model";
 
-let configured: OBC.IfcLoader | null = null;
+/**
+ * Which worlds have already had their loader configured.
+ *
+ * Keyed by the world, not global. `setup()` is slow enough to be worth doing once, but the loader
+ * it configures belongs to one `Components` — and reads its `FragmentsManager` off that same
+ * instance at load time. Caching one loader across worlds meant that once a tab unmounted and
+ * disposed its world, every later tab got a loader pointing at the dead one, whose fragments core
+ * is gone: "You need to initialize fragments first". A WeakMap keeps the once-only setup while
+ * letting each live world have its own loader, and forgets a world as soon as it is collected.
+ */
+const configured = new WeakMap<OBC.Components, Promise<OBC.IfcLoader>>();
 
-async function loaderFor(viewer: Viewer): Promise<OBC.IfcLoader> {
-  if (configured) return configured;
+function loaderFor(viewer: Viewer): Promise<OBC.IfcLoader> {
+  const existing = configured.get(viewer.components);
+  if (existing) return existing;
 
-  const loader = viewer.components.get(OBC.IfcLoader);
-  await loader.setup({
-    autoSetWasm: false,
-    wasm: { path: "/wasm/", absolute: true },
-  });
+  const setup = (async () => {
+    const loader = viewer.components.get(OBC.IfcLoader);
+    await loader.setup({
+      autoSetWasm: false,
+      wasm: { path: "/wasm/", absolute: true },
+    });
+    return loader;
+  })();
 
-  configured = loader;
-  return loader;
+  // Stored before it settles, so two loads racing on the same world share one setup. A failed
+  // setup is dropped rather than cached, so a retry is not stuck with the failure.
+  configured.set(viewer.components, setup);
+  setup.catch(() => configured.delete(viewer.components));
+  return setup;
 }
 
 /** Drops any previously loaded model so a second file cannot show the first one's geometry. */

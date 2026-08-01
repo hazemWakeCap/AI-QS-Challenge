@@ -35,6 +35,7 @@ assumptions and reconciliation before award, drill into which resource an over-r
 | 14 | IFC Take-off | *What would this model cost at our rates?* | [22-ifc-takeoff.md](22-ifc-takeoff.md) |
 | 15 | 4D Build Sequence | *Play the build, coloured by cost performance.* | [23-4d-build-sequence.md](23-4d-build-sequence.md) |
 | 16 | Forecast Build Sequence | *At this pace, when does the frame close — and which trade holds it open?* | [24-forecast-build-sequence.md](24-forecast-build-sequence.md) |
+| 17 | Projected EVM | *What does this centre cost in three months, if work and money both keep their pace?* | [25-projected-evm.md](25-projected-evm.md) |
 
 ### Read it end to end
 

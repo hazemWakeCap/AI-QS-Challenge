@@ -1,10 +1,5 @@
 import { useRef } from "react";
-import {
-  NOT_IN_BILL_LABEL, VIDEO_CAPTION_BODY, VIDEO_CAPTION_LEAD, VIDEO_SUBTITLE, VIDEO_TITLE,
-  periodLabel, standingLabel, unpricedLabel,
-} from "../model/buildVideoCopy";
-import { centreLegend, hex } from "../model/costPaint";
-import { unplacedLegend } from "../model/ifcPaint";
+import { RenderOverlay } from "./RenderOverlay";
 import { useBuildStage } from "./useBuildStage";
 
 /**
@@ -35,37 +30,7 @@ export function RenderHarness() {
 
       {error && <div className="render-error" data-render-error>{error}</div>}
 
-      <div className="render-overlay">
-        <div className="render-heading">
-          <div className="render-title">{VIDEO_TITLE}</div>
-          <div className="render-sub">{VIDEO_SUBTITLE}</div>
-        </div>
-
-        {caption && meta && (
-          <div className="render-stats" data-render-stats>
-            <div className="render-period">{periodLabel(caption.period)}</div>
-            <div className="render-count">{standingLabel(caption.built, meta.mapped)}</div>
-            <div className="render-gap">{unpricedLabel(meta.unpriced)}</div>
-          </div>
-        )}
-
-        <div className="render-legend">
-          {centreLegend().map((l) => (
-            <span key={l.label} className="legend-item">
-              <i style={{ background: hex(l.color) }} aria-hidden="true" />
-              {l.label}
-            </span>
-          ))}
-          <span className="legend-item">
-            <i style={{ background: hex(unplacedLegend.color) }} aria-hidden="true" />
-            {NOT_IN_BILL_LABEL}
-          </span>
-        </div>
-
-        <div className="render-caption">
-          <b>{VIDEO_CAPTION_LEAD}</b> {VIDEO_CAPTION_BODY}
-        </div>
-      </div>
+      <RenderOverlay meta={meta} caption={caption} />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import type * as FRAGS from "@thatopen/fragments";
-import type { CostCentreEvm, ElementMap, MappedElement, MappedItem } from "../api/client";
+import type { CentreVerdict, ElementMap, MappedElement, MappedItem } from "../api/client";
 
 /**
  * Resolves the authored element register against a loaded model.
@@ -98,10 +98,10 @@ export async function buildElementIndex(
  * An element usually touches more than one — a slab is concrete AND its soffit formwork, and those
  * are two separately tracked centres with their own earned value.
  */
-export function centresFor(
+export function centresFor<T extends CentreVerdict>(
   resolved: ResolvedElement,
-  centres: readonly CostCentreEvm[],
-): CostCentreEvm[] {
+  centres: readonly T[],
+): T[] {
   const wanted = new Set(resolved.items.map((i) => i.bccId).filter((b): b is string => !!b));
   return centres.filter((c) => wanted.has(c.bccId));
 }
@@ -121,7 +121,7 @@ const SEVERITY: Record<string, number> = {
  * drifting is a slab with a problem, and averaging the two would hide it — the same aggregation
  * trap the zone map's MIXED colour exists to avoid.
  */
-export function worstAlert(centres: readonly CostCentreEvm[]): string | null {
+export function worstAlert(centres: readonly CentreVerdict[]): string | null {
   let worst: string | null = null;
   let rank = -1;
   for (const c of centres) {

@@ -29,6 +29,30 @@ the animation cannot hide trouble:
 - An element shows the **worst** alert among its centres. A slab whose concrete is on budget and
   whose formwork is drifting is a slab with a problem.
 
+**What each frame says, beside the picture.** The model alone shows shape and colour, not scope or
+money, so three readouts ride along with it and every one of them is derived from the period being
+drawn:
+
+- **Rising now** (top left) — the cost centres that gained ground *this* period, richest work first,
+  each with its package code, its percent complete, the points it gained, and a dot in its own alert
+  colour. Ranked by `BAC × points gained` rather than by percentage, because the biggest percentage
+  move is often the smallest centre. Scoped to the centres the model can actually show: naming a
+  rising fit-out package beside a picture in which nothing fit-out can move would describe something
+  the viewer cannot see.
+- **The two lines under it** exist so that list cannot be mistaken for the job — how many more
+  centres moved on the model, how many moved across the whole project, and the share of the bill the
+  elements on screen carry (`22.2M of 224.3M AED — 10% of it`).
+- **Project to date** (the strip above the legend) — earned value, actual cost and CPI, forecast at
+  completion with the overrun named rather than signed, and percent complete against percent
+  planned with SPI. Project-wide, labelled as such. These are the *same sums over the same rows*
+  the `/api/v1/evm` endpoint performs (`model/buildVideoStats.totalsOf` mirrors
+  `DashboardController.Totals`), so a frame paused beside the EVM tab reads identically — period 12
+  says EV 77.3M, CPI 0.933, EAC 240.4M, 16.1M over, SPI 0.865 on both.
+
+The period readout also carries the calendar month (`Period 7 · Apr 2026`), parsed out of the date
+string rather than through `toLocaleDateString`, which would render differently on a differently
+configured machine and break the byte-identical guarantee below.
+
 **The render is not a screen recording.** The app publishes a small purpose-built surface at
 `/?render=1` (`components/RenderHarness.tsx`) exposing `window.__qsRender` with `ready` and
 `renderFrame(t, camT)`. Its only job is to draw the model and its caption at a fixed size and
@@ -43,6 +67,15 @@ render. Frame *k* is therefore identical on every run.
 
 Because the harness is separate from the product UI, renaming a button or moving a panel cannot
 change or silently break the video.
+
+**Three surfaces draw a frame; none of them owns its wording.** The harness and the in-app Build
+Video panel mount the same `components/RenderOverlay.tsx`, so the previewed frame and the recorded
+one cannot drift apart. The third — `model/videoCompositor.ts` — cannot share JSX, because
+`captureStream()` sees only the WebGL canvas and would silently drop every word of the overlay; it
+redraws the same blocks into a 2D canvas. All three take every string from
+`model/buildVideoCopy.ts` and every number from `model/buildVideoStats.ts`, and a test reads the
+sources to assert none of them re-types either. That test exists because the drift had already
+happened once: the in-app panel had hard-coded the element counts the harness imported.
 
 ## Regenerating
 

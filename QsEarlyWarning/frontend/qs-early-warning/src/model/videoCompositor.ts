@@ -1,8 +1,10 @@
 import {
   NOT_IN_BILL_LABEL, VIDEO_CAPTION_BODY, VIDEO_CAPTION_LEAD, VIDEO_SUBTITLE, VIDEO_TITLE,
-  periodLabel, standingLabel, unpricedLabel,
+  budgetCells, modelScopeLabel, periodLabel, projectHeading, risingDeltaLabel, risingHeading,
+  risingMoreLabel, risingPctLabel, standingLabel, unpricedLabel,
 } from "./buildVideoCopy";
-import { centreLegend, hex } from "./costPaint";
+import type { FrameReadout } from "./buildVideoStats";
+import { centreLegend, colorForCentreAlert, hex } from "./costPaint";
 import { unplacedLegend } from "./ifcPaint";
 
 /**
@@ -21,9 +23,15 @@ import { unplacedLegend } from "./ifcPaint";
 
 export interface OverlayState {
   period: number;
+  /** The calendar month the period stands for, when the workbook gave one. */
+  month: string | null;
+  /** Last period the sequence runs to, for "period 7 of 12". */
+  maxPeriod: number;
   built: number;
   mapped: number;
   unpriced: number;
+  /** What is rising, and where the money stands. Absent only before the data has loaded. */
+  readout: FrameReadout | null;
 }
 
 const W = 1600;
@@ -63,6 +71,10 @@ export function createCompositor(): Compositor {
       if (gl.width > 0 && gl.height > 0) ctx.drawImage(gl, 0, 0, W, H);
       drawHeading(ctx);
       drawStats(ctx, state);
+      if (state.readout) {
+        drawRising(ctx, state.readout);
+        drawStrip(ctx, state.readout, state.maxPeriod);
+      }
       drawLegend(ctx);
       drawCaption(ctx);
     },
@@ -100,13 +112,129 @@ function drawStats(ctx: CanvasRenderingContext2D, s: OverlayState) {
   ctx.fillStyle = INK;
   ctx.fillText(periodLabel(s.period), right, PAD_Y);
 
+  if (s.month) {
+    ctx.font = `15px ${UI}`;
+    ctx.fillStyle = INK_SOFT;
+    ctx.fillText(s.month, right, PAD_Y + 58);
+  }
+
   ctx.font = `15px ${UI}`;
   ctx.fillStyle = INK_SOFT;
-  ctx.fillText(standingLabel(s.built, s.mapped), right, PAD_Y + 56);
+  ctx.fillText(standingLabel(s.built, s.mapped), right, PAD_Y + 84);
 
   ctx.font = `13px ${UI}`;
   ctx.fillStyle = INK_FAINT;
-  ctx.fillText(unpricedLabel(s.unpriced), right, PAD_Y + 80);
+  ctx.fillText(unpricedLabel(s.unpriced), right, PAD_Y + 108);
+}
+
+/**
+ * The rising list, top-left under the heading.
+ *
+ * <b>Why it sits where it does.</b> The camera sweeps, so the model's silhouette moves between
+ * frames; the bands that stay clear of it for the whole run are the top of the frame and the strip
+ * above the legend. Both readouts live in those bands rather than in a floating card, so nothing
+ * ever has to be drawn over the building to stay legible.
+ */
+const RISING_TOP = 152;
+const RISING_ROW_H = 22;
+/**
+ * Column stops, measured against the longest real value in each: `BCC-STR-SHAFT-1505` in semibold
+ * 13px is a shade under 144px, and anything tighter has the package code sitting on top of it.
+ */
+const COL_ID = PAD_X + 16;
+const COL_PKG = PAD_X + 160;
+const COL_PCT = PAD_X + 320;   // right-aligned
+const COL_DELTA = PAD_X + 400; // right-aligned
+
+function drawRising(ctx: CanvasRenderingContext2D, r: FrameReadout) {
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+
+  ctx.font = `12px ${UI}`;
+  ctx.fillStyle = INK_FAINT;
+  ctx.fillText(risingHeading(r.disciplines), PAD_X, RISING_TOP);
+
+  r.rising.forEach((c, i) => {
+    const y = RISING_TOP + 24 + i * RISING_ROW_H;
+
+    ctx.fillStyle = hex(colorForCentreAlert(c.alertLevel));
+    ctx.fillRect(PAD_X, y + 3, 10, 10);
+
+    ctx.textAlign = "left";
+    ctx.font = `600 13px ${UI}`;
+    ctx.fillStyle = INK;
+    ctx.fillText(c.bccId, COL_ID, y);
+
+    ctx.font = `13px ${UI}`;
+    ctx.fillStyle = INK_SOFT;
+    ctx.fillText(c.packageCode, COL_PKG, y);
+
+    ctx.textAlign = "right";
+    ctx.font = `600 13px ${UI}`;
+    ctx.fillStyle = INK;
+    ctx.fillText(risingPctLabel(c.actualPct), COL_PCT, y);
+
+    ctx.font = `13px ${UI}`;
+    ctx.fillStyle = INK_SOFT;
+    ctx.fillText(risingDeltaLabel(c.deltaPp), COL_DELTA, y);
+  });
+
+  const notesTop = RISING_TOP + 24 + r.rising.length * RISING_ROW_H + 4;
+  ctx.textAlign = "left";
+  ctx.font = `12px ${UI}`;
+  ctx.fillStyle = INK_FAINT;
+  ctx.fillText(risingMoreLabel(r.risingMore, r.projectMoving), PAD_X, notesTop);
+  ctx.fillText(modelScopeLabel(r.onModelBac, r.totals.bac), PAD_X, notesTop + 18);
+}
+
+/** The money-and-programme strip, in the clear band between the model and the legend. */
+const STRIP_TOP = H - 244;
+const CELL_X = [PAD_X, 420, 760, 1130];
+
+/**
+ * A scrim under the strip, feathered at both edges.
+ *
+ * The band is clear of the model for most of the sweep but not all of it — at the low periods a
+ * column drops through the "Actual cost" cell. Rather than move the strip somewhere the camera
+ * reaches even more often, the few frames that collide get the background painted back over the
+ * geometry. `SCRIM_INK` is the page gradient's own tone at this height, so where the scrim is fully
+ * opaque it is indistinguishable from the background and no band edge appears.
+ */
+const SCRIM_INK = "239, 243, 248";
+const SCRIM_TOP = STRIP_TOP - 26;
+const SCRIM_BOTTOM = STRIP_TOP + 108;
+
+function drawStrip(ctx: CanvasRenderingContext2D, r: FrameReadout, maxPeriod: number) {
+  const scrim = ctx.createLinearGradient(0, SCRIM_TOP, 0, SCRIM_BOTTOM);
+  scrim.addColorStop(0, `rgba(${SCRIM_INK}, 0)`);
+  scrim.addColorStop(0.3, `rgba(${SCRIM_INK}, 0.92)`);
+  scrim.addColorStop(0.78, `rgba(${SCRIM_INK}, 0.92)`);
+  scrim.addColorStop(1, `rgba(${SCRIM_INK}, 0)`);
+  ctx.fillStyle = scrim;
+  ctx.fillRect(0, SCRIM_TOP, W, SCRIM_BOTTOM - SCRIM_TOP);
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+
+  ctx.font = `12px ${UI}`;
+  ctx.fillStyle = INK_FAINT;
+  ctx.fillText(projectHeading(r.period, maxPeriod), PAD_X, STRIP_TOP);
+
+  budgetCells(r).forEach((cell, i) => {
+    const x = CELL_X[i] ?? PAD_X;
+
+    ctx.font = `11px ${UI}`;
+    ctx.fillStyle = INK_FAINT;
+    ctx.fillText(cell.label, x, STRIP_TOP + 22);
+
+    ctx.font = `600 15px ${UI}`;
+    ctx.fillStyle = INK;
+    ctx.fillText(cell.value, x, STRIP_TOP + 38);
+
+    ctx.font = `12px ${UI}`;
+    ctx.fillStyle = INK_SOFT;
+    ctx.fillText(cell.note, x, STRIP_TOP + 60);
+  });
 }
 
 function drawLegend(ctx: CanvasRenderingContext2D) {

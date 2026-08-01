@@ -104,6 +104,51 @@ public sealed class ForecastController : ControllerBase
                 f.Validation.Notes)));
     }
 
+    /// <summary>
+    /// The cost-centre EVM panel at any period, measured or projected — what the take-off tab reads so
+    /// its figures keep moving past the last reported period instead of freezing at the origin.
+    ///
+    /// At or below the origin this is a passthrough of the reported rows, identical to
+    /// <c>/api/v1/cost-centres</c>, so the caller has one shape either side of the boundary. Past it,
+    /// EV comes from the progress projection through the schema's own <c>BAC × pct</c> identity and AC
+    /// from the incremental-spend cone; PV and SPI are null, because the baseline curve ends at the
+    /// origin and no planned value is invented for a period that has none.
+    ///
+    /// <paramref name="bcc"/> is a comma-separated centre list; omit it for every centre.
+    /// </summary>
+    [HttpGet("panel")]
+    public async Task<IActionResult> Panel([FromQuery] int? period, [FromQuery] string? bcc, CancellationToken ct)
+    {
+        var (snap, err) = await Resolve(ct); if (err is not null) return err;
+
+        var projector = new EvmProjector(snap!.Panel, snap.ProgressForecaster, snap.Forecaster, snap.ForecastPeriod);
+        int p = period ?? snap.ForecastPeriod;
+
+        if (p < projector.MinPeriod || p > projector.MaxPeriod)
+            return BadRequest(new { error = $"period must be in [{projector.MinPeriod}, {projector.MaxPeriod}]." });
+        if (p > projector.OriginPeriod && !projector.CanProject) return NoForecast();
+
+        var ids = bcc?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var panel = projector.ProjectAt(p, ids);
+
+        return Ok(new ProjectedPanelDto(
+            panel.Period, panel.OriginPeriod, panel.HorizonPeriod,
+            panel.BacktestedThroughPeriod, panel.SpendBacktestedThroughPeriod,
+            panel.Basis.ToString(), panel.Method,
+            panel.PvAvailable, panel.PvReason, panel.Notes,
+            panel.Centres.Select(c => new ProjectedCentreDto(
+                c.BccId, c.PeriodId, c.Basis.ToString(),
+                c.Discipline, c.PackageCode, c.Lifecycle,
+                Money(c.Bac),
+                Round(c.PctComplete), San(c.PctP10), San(c.PctP90),
+                Money(c.Ev), Cash(c.EvP10), Cash(c.EvP90),
+                Cash(c.Ac), Cash(c.AcP10), Cash(c.AcP90), c.AcAvailable, c.AcNote,
+                Cash(c.Cv), San(c.Cpi), Cash(c.Eac), Cash(c.Vac), San(c.PctBudgetConsumed),
+                Cash(c.Pv), San(c.Spi), San(c.PlannedPct),
+                c.AlertLevel, c.AlertProjected,
+                c.ProjectedFinishPeriod, Round(c.PacePctPerPeriod), c.Stalled)).ToList()));
+    }
+
     private static HorizonMetricDto Map(HorizonMetric m) => new(
         m.Predictor, m.Horizon, m.N, Round(m.MaePctOfBac), Round(m.Wape),
         San(m.CoverageP10P90), San(m.CoverageLow), San(m.CoverageHigh), m.FallbackCount);
@@ -123,4 +168,9 @@ public sealed class ForecastController : ControllerBase
 
     private static double Round(double v) => double.IsFinite(v) ? Math.Round(v, 4) : 0;
     private static double? San(double? v) => v is double d && double.IsFinite(d) ? Math.Round(d, 4) : null;
+
+    // Amounts as decimal at 2dp, matching how the dashboard serialises money. `Cash` keeps null
+    // meaningful — an unavailable AC must not serialise as a confident zero.
+    private static decimal Money(double v) => Math.Round((decimal)(double.IsFinite(v) ? v : 0), 2);
+    private static decimal? Cash(double? v) => v is double d && double.IsFinite(d) ? Math.Round((decimal)d, 2) : null;
 }

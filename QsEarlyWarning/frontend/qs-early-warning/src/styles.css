@@ -87,7 +87,9 @@ select:hover { border-color: var(--accent); }
 .main { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--sp-4); overflow-x: auto; box-shadow: var(--sh-2); }
 
 .watchlist-head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
-.pill { font-size: var(--fs-eyebrow); font-weight: 700; letter-spacing: .05em; padding: 3px 9px; border-radius: var(--r-pill); }
+/* nowrap: a pill sitting at the end of a long line was breaking across two of them, so its border
+   split in half around the wrap and it stopped reading as one label. */
+.pill { font-size: var(--fs-eyebrow); font-weight: 700; letter-spacing: .05em; padding: 3px 9px; border-radius: var(--r-pill); white-space: nowrap; }
 .pill-forecast, .pill-green { background: rgba(34,165,106,.16); color: var(--good); border: 1px solid rgba(34,165,106,.4); }
 .pill-hist, .pill-amber { background: rgba(217,154,28,.16); color: var(--warn); border: 1px solid rgba(217,154,28,.4); }
 .pill-blue { background: var(--accent-weak); color: var(--accent); border: 1px solid rgba(47,111,224,.4); }
@@ -212,9 +214,15 @@ table.mini { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
   border-radius: var(--r-sm) var(--r-sm) 0 0; padding: 9px 14px; font-size: 13px; font-weight: 600; cursor: pointer; margin-bottom: -1px; }
 .tab:hover { color: var(--text); background: var(--surface-2); }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); background: transparent; }
-/* featured nav tab (AI Assistant) — stands out among the plain tabs */
-.tab-featured { color: var(--accent); background: var(--accent-weak); }
+/* featured nav tab (AI Assistant) — stands out among the plain tabs.
+   No filled background: an accent-weak fill is this sheet's "selected" idiom (.chip-btn.active,
+   tr.selected), so it read as permanently selected once this stopped being the default tab.
+   Emphasis is carried by the accent label + leading dot, which selection never uses. */
+.tab-featured { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); background: transparent; }
+.tab-featured::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.tab-featured:hover { color: var(--accent); background: var(--surface-2); }
 .tab-featured.active { color: var(--text); }   /* active state keeps the normal look + accent underline */
+.tab-featured.active::before { background: var(--accent); }
 
 /* ── Data Admin: workbook sheet nav (sheet-tabs → chips → lineage header) ── */
 .sheet-tabs { display: flex; gap: var(--sp-1); margin: var(--sp-3) 0; flex-wrap: wrap;
@@ -651,8 +659,44 @@ tr.selected td { background: var(--accent-weak); box-shadow: inset 3px 0 0 var(-
 .render-stats { position: absolute; top: 40px; right: 48px; text-align: right; }
 .render-period { font-family: var(--font-display); font-size: 44px; font-weight: 600;
   color: var(--ink); line-height: 1; }
-.render-count { font-size: 15px; color: var(--ink-soft); margin-top: 8px; }
+.render-month { font-size: 15px; color: var(--ink-soft); margin-top: 10px; }
+.render-count { font-size: 15px; color: var(--ink-soft); margin-top: 6px; }
 .render-gap { font-size: 13px; color: var(--ink-faint); margin-top: 4px; }
+
+/* The two data readouts sit in the bands the camera sweep never puts the model in — the top of the
+   frame and the strip above the legend. Offsets here mirror the constants in videoCompositor.ts,
+   which redraws the same blocks into a canvas; move one and the other has to follow. */
+.render-block-head { font-size: 12px; color: var(--ink-faint); line-height: 15px; }
+.render-block-note { font-size: 12px; color: var(--ink-faint); line-height: 15px; margin-top: 4px;
+  white-space: nowrap; }
+.render-block-note + .render-block-note { margin-top: 3px; }
+
+.render-rising { position: absolute; top: 152px; left: 48px; width: 560px; }
+.render-rising-row { display: flex; align-items: center; width: 400px; height: 22px;
+  font-size: 13px; color: var(--ink-soft); white-space: nowrap; }
+.render-rising-row:first-of-type { margin-top: 9px; }
+.render-rising-row i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.render-rising-id { width: 144px; margin-left: 6px; font-weight: 600; color: var(--ink); }
+.render-rising-pkg { flex: 1; }
+.render-rising-pct { width: 60px; text-align: right; font-weight: 600; color: var(--ink); }
+.render-rising-delta { width: 80px; text-align: right; }
+
+.render-strip { position: absolute; left: 48px; right: 48px; top: 656px; }
+/* Paints the page background back over the few frames where a column drops through the strip. The
+   tone is the stage gradient's own at this height, so the opaque middle leaves no visible edge. */
+.render-strip::before { content: ""; position: absolute; left: -48px; right: -48px;
+  top: -26px; height: 134px; z-index: -1;
+  background: linear-gradient(to bottom,
+    rgba(239, 243, 248, 0) 0%, rgba(239, 243, 248, 0.92) 30%,
+    rgba(239, 243, 248, 0.92) 78%, rgba(239, 243, 248, 0) 100%); }
+.render-cells { display: flex; margin-top: 7px; }
+.render-cell:nth-child(1) { width: 372px; }
+.render-cell:nth-child(2) { width: 340px; }
+.render-cell:nth-child(3) { width: 370px; }
+.render-cell-label { font-size: 11px; color: var(--ink-faint); line-height: 13px; }
+.render-cell-value { font-size: 15px; font-weight: 600; color: var(--ink); line-height: 18px;
+  margin-top: 3px; }
+.render-cell-note { font-size: 12px; color: var(--ink-soft); line-height: 15px; margin-top: 4px; }
 
 .render-legend { position: absolute; left: 200px; bottom: 112px;
   display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--ink-soft); }

@@ -49,3 +49,29 @@ public sealed record ProgressValidationDto(
 public sealed record ProgressForecastDto(
     int OriginPeriod, int HorizonPeriod, int BacktestedThroughPeriod, int SuggestedHorizonPeriod,
     string Method, IReadOnlyList<CentreProgressDto> Centres, ProgressValidationDto Validation);
+
+// ── projected EVM panel (the take-off tab past the last reported period) ──
+// Unlike the progress projection above, this DOES carry cost — because EV is defined by the schema as
+// BAC × percent complete, so projecting the percentage projects the earned value by the same arithmetic
+// the database performs. AC is never derived from progress: it comes from the incremental-spend cone or
+// the row reports it unavailable. PV and SPI are null past the origin; the baseline curve ends there.
+
+/// <summary>Basis is "Measured" | "Forecast" | "Extrapolated" — what stands behind this row.</summary>
+public sealed record ProjectedCentreDto(
+    string BccId, int PeriodId, string Basis,
+    string? Discipline, string PackageCode, string Lifecycle,
+    decimal Bac,
+    double PctComplete, double? PctP10, double? PctP90,
+    decimal Ev, decimal? EvP10, decimal? EvP90,
+    decimal? Ac, decimal? AcP10, decimal? AcP90, bool AcAvailable, string? AcNote,
+    decimal? Cv, double? Cpi, decimal? Eac, decimal? Vac, double? PctBudgetConsumed,
+    decimal? Pv, double? Spi, double? PlannedPct,
+    string AlertLevel, bool AlertProjected,
+    int? ProjectedFinishPeriod, double PacePctPerPeriod, bool Stalled);
+
+public sealed record ProjectedPanelDto(
+    int Period, int OriginPeriod, int HorizonPeriod,
+    int BacktestedThroughPeriod, int SpendBacktestedThroughPeriod,
+    string Basis, string Method,
+    bool PvAvailable, string? PvReason,
+    IReadOnlyList<string> Notes, IReadOnlyList<ProjectedCentreDto> Centres);

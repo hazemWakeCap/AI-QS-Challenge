@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from "react";
-import { api, session, type Health, type Project, type CostCentreEvm } from "./api/client";
+import { api, session, type Health, type Project, type CostCentreEvm, type ProjectedCentre } from "./api/client";
 import { EvmOverview } from "./components/EvmOverview";
 import { CostCentreGrid } from "./components/CostCentreGrid";
 import { CapturePanel } from "./components/CapturePanel";
@@ -30,11 +30,11 @@ import { EmptyState, Spinner } from "./components/Loading";
 
 type Tab = "copilot" | "overview" | "centres" | "model" | "ifc" | "video" | "capture" | "workflow" | "data" | "watchlist" | "proof" | "forecast" | "stress" | "validation" | "projects";
 const TABS: { id: Tab; label: string; featured?: boolean }[] = [
-  { id: "copilot", label: "AI Assistant", featured: true },
   { id: "overview", label: "EVM Overview" },
+  { id: "ifc", label: "IFC Take-off" },
+  { id: "copilot", label: "AI Assistant", featured: true },
   { id: "centres", label: "Cost Centres" },
   { id: "model", label: "3D Cost X-Ray" },
-  { id: "ifc", label: "IFC Take-off" },
   { id: "video", label: "Build Video" },
   { id: "capture", label: "Monthly Capture" },
   { id: "workflow", label: "Periods & Estimate" },
@@ -49,6 +49,19 @@ const TABS: { id: Tab; label: string; featured?: boolean }[] = [
 
 /** The exporter's entry point. A query flag rather than a route — there is no router here. */
 const IS_RENDER_MODE = new URLSearchParams(window.location.search).get("render") === "1";
+
+/** Lets another app link straight to a tab (`/?tab=ifc`) — same reasoning as `render` above: a
+ *  query flag, not a route, because there is still no router here. Anything unrecognised falls
+ *  back to the normal default rather than rendering a blank shell. */
+const LINKED_TAB = ((): Tab | null => {
+  const requested = new URLSearchParams(window.location.search).get("tab");
+  return TABS.some((t) => t.id === requested) ? (requested as Tab) : null;
+})();
+
+/** Set when this app is framed inside another one (`/?tab=ifc&embed=1`), which supplies its own
+ *  title and navigation — ours would be a second set of both. Hides the topbar and the tab strip
+ *  only; the project and period pickers stay, since the tabs' content depends on them. */
+const IS_EMBEDDED = new URLSearchParams(window.location.search).get("embed") === "1";
 
 export default function App() {
   // Checked before any product state exists: the harness shares nothing with the dashboard beyond
@@ -71,11 +84,13 @@ function Dashboard() {
   const [slug, setSlug] = useState<string>("");
   const [range, setRange] = useState<{ min: number; forecast: number }>({ min: 1, forecast: 12 });
   const [period, setPeriod] = useState(12);
-  const [tab, setTab] = useState<Tab>("copilot");
+  const [tab, setTab] = useState<Tab>(LINKED_TAB ?? "overview");
   const [rev, setRev] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const [varianceBcc, setVarianceBcc] = useState<string | null>(null);
-  const [selectedCentre, setSelectedCentre] = useState<CostCentreEvm | null>(null);
+  // Either shape: the grid and the 3D tab hand over a reported row, the take-off tab may hand over a
+  // projected one. The drawer tells them apart and labels accordingly.
+  const [selectedCentre, setSelectedCentre] = useState<CostCentreEvm | ProjectedCentre | null>(null);
   // The period the drawer should read. Normally the selected period, but the 3D tab can be scrubbed
   // independently and hands its own period over with the row.
   const [drawerPeriod, setDrawerPeriod] = useState<number | null>(null);
@@ -127,13 +142,15 @@ function Dashboard() {
 
   return (
     <div className="app">
-      <header className="topbar">
-        <div>
-          <h1>QS Cost — System of Record</h1>
-          <p className="muted">Live EVM from Postgres · multi-project · data entry replaces the spreadsheet.</p>
-        </div>
-        {health && <div className="health muted small">scorer {health.scorerVersion} · {health.centreCount} centres loaded</div>}
-      </header>
+      {!IS_EMBEDDED && (
+        <header className="topbar">
+          <div>
+            <h1>QS Cost — System of Record</h1>
+            <p className="muted">Live EVM from Postgres · multi-project · data entry replaces the spreadsheet.</p>
+          </div>
+          {health && <div className="health muted small">scorer {health.scorerVersion} · {health.centreCount} centres loaded</div>}
+        </header>
+      )}
 
       <div className="controls">
         <label>Project&nbsp;
@@ -142,7 +159,9 @@ function Dashboard() {
             {projects.map((p) => <option key={p.slug} value={p.slug}>{p.name} ({p.reportingCurrency})</option>)}
           </select>
         </label>
-        <button className="btn btn-sm btn-secondary" onClick={() => setTab("projects")}>+ New / Manage</button>
+        {/* Hidden when embedded: it switches to the Projects tab, which the host app offers no tab
+            strip to come back from. Project admin stays in this app's own window. */}
+        {!IS_EMBEDDED && <button className="btn btn-sm btn-secondary" onClick={() => setTab("projects")}>+ New / Manage</button>}
         <label>Period&nbsp;
           <select value={period} onChange={(e) => setPeriod(Number(e.target.value))}>
             {periods.map((p) => <option key={p} value={p}>Period {p}{p === range.forecast ? " — forecast" : ""}</option>)}
@@ -153,11 +172,13 @@ function Dashboard() {
 
       {err && <div className="error">{err}</div>}
 
-      <nav className="tabs">
-        {TABS.map((t) => (
-          <button key={t.id} className={["tab", tab === t.id && "active", t.featured && "tab-featured"].filter(Boolean).join(" ")} onClick={() => setTab(t.id)}>{t.label}</button>
-        ))}
-      </nav>
+      {!IS_EMBEDDED && (
+        <nav className="tabs">
+          {TABS.map((t) => (
+            <button key={t.id} className={["tab", tab === t.id && "active", t.featured && "tab-featured"].filter(Boolean).join(" ")} onClick={() => setTab(t.id)}>{t.label}</button>
+          ))}
+        </nav>
+      )}
 
       <div className="content">
         {tab === "projects" ? (

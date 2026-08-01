@@ -1,13 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { timeline } from "../model/cameraPath";
-import {
-  NOT_IN_BILL_LABEL, VIDEO_CAPTION_BODY, VIDEO_CAPTION_LEAD, VIDEO_SUBTITLE, VIDEO_TITLE,
-} from "../model/buildVideoCopy";
-import { centreLegend, hex } from "../model/costPaint";
-import { unplacedLegend } from "../model/ifcPaint";
 import { createCompositor } from "../model/videoCompositor";
 import { pickMimeType, startRecording } from "../model/videoRecorder";
 import { Spinner } from "./Loading";
+import { RenderOverlay } from "./RenderOverlay";
 import { useBuildStage } from "./useBuildStage";
 
 /**
@@ -91,9 +87,12 @@ export function BuildVideo() {
         const info = await renderFrame(times[i], i / (times.length - 1));
         compositor.draw(gl, {
           period: info.period,
+          month: info.month,
+          maxPeriod: meta.maxPeriod,
           built: info.built,
           mapped: meta.mapped,
           unpriced: meta.unpriced,
+          readout: info.readout,
         });
         recording.pushFrame();
 
@@ -182,41 +181,7 @@ export function BuildVideo() {
         >
           <div className="render-canvas" ref={hostRef} />
 
-          <div className="render-overlay">
-            <div className="render-heading">
-              <div className="render-title">{VIDEO_TITLE}</div>
-              <div className="render-sub">{VIDEO_SUBTITLE}</div>
-            </div>
-
-            {caption && meta && (
-              <div className="render-stats">
-                <div className="render-period">Period {caption.period}</div>
-                <div className="render-count">
-                  {caption.built.toLocaleString()} of {meta.mapped.toLocaleString()} priced elements standing
-                </div>
-                <div className="render-gap">
-                  {meta.unpriced.toLocaleString()} elements the bill never priced — they never build
-                </div>
-              </div>
-            )}
-
-            <div className="render-legend">
-              {centreLegend().map((l) => (
-                <span key={l.label} className="legend-item">
-                  <i style={{ background: hex(l.color) }} aria-hidden="true" />
-                  {l.label}
-                </span>
-              ))}
-              <span className="legend-item">
-                <i style={{ background: hex(unplacedLegend.color) }} aria-hidden="true" />
-                {NOT_IN_BILL_LABEL}
-              </span>
-            </div>
-
-            <div className="render-caption">
-              <b>{VIDEO_CAPTION_LEAD}</b> {VIDEO_CAPTION_BODY}
-            </div>
-          </div>
+          <RenderOverlay meta={meta} caption={caption} />
         </div>
 
         {(busy || !meta) && (

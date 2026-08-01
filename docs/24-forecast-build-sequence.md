@@ -64,6 +64,9 @@ actuals do: past the origin there is no future plan curve left to scale. A sched
 version of this feature could reach that accuracy. This one cannot, and says so rather than
 implying otherwise.
 
+The same missing plan curve is why [feature 17](25-projected-evm.md) returns no PV and no SPI past
+the origin, even though it does project the rest of the EVM row.
+
 ## The band
 
 `P10` and `P90` are the median projection offset by the **empirical residual quantiles** the

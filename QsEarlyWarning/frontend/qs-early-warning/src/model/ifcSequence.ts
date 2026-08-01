@@ -312,3 +312,82 @@ export function frameAt(
 
   return { built, confident, shell, alertByLocalId, builtCount: built.size, shellCount: shell.size, tier };
 }
+
+/** Where one cost centre stands in relation to one element, at one moment. */
+export interface CentreReach {
+  bccId: string;
+  /**
+   * Whether this centre's progress has actually reached this element yet.
+   *
+   * The distinction the UI was missing. A slab is concrete AND soffit formwork, and at period 8 the
+   * concrete centre has poured 151 of 299 slabs while the formwork centre has struck 106 — so slabs
+   * 107–151 are bound to an AMBER formwork centre that has not got to them. They are painted by the
+   * concrete verdict alone, and correctly read green.
+   */
+  reached: boolean;
+  /** This centre's verdict at this period, whether or not it has reached the element. */
+  alertLevel: string;
+  /** Whether this is the centre the element's colour was taken from. At most one is. */
+  driving: boolean;
+  /** 1-based position of the element in this centre's build order, and how many it carries. */
+  position: number;
+  total: number;
+}
+
+/**
+ * Why one element reads the colour it does.
+ *
+ * <b>Not a second opinion — the same arithmetic, asked about one element.</b> `frameAt` decides an
+ * element's colour by walking every centre that has reached it and letting the worst win, but it
+ * returns only the verdict, so the panel beside the model could list an element's centres and never
+ * say which of them was the one on screen. That is what made a slab painted amber sit next to a
+ * cost centre reading GREEN with nothing to reconcile them: the centre driving the colour was the
+ * *other* one in the list, and a third of the slabs standing at that period were not bound to it yet
+ * at all.
+ *
+ * Called once per selection, never per frame, so walking the centres to find the element is cheap
+ * where doing it for 1,127 elements thirty times a second would not be. The test suite pins its
+ * answer against `frameAt`'s, so the two cannot drift into disagreeing about one element.
+ */
+export function reachOf(
+  localId: number,
+  t: number,
+  sequence: BuildSequence,
+  centresByPeriod: Map<number, CostCentreEvm[]>,
+  progress: ProgressIndex | null = null,
+): CentreReach[] {
+  const states = statesAt(t, centresByPeriod, progress);
+  const out: CentreReach[] = [];
+
+  for (const [bccId, ordered] of sequence) {
+    const position = ordered.indexOf(localId);
+    if (position < 0) continue;
+    const state = states.get(bccId);
+    if (!state) continue;
+
+    // `frameAt` colours everything up to the optimistic end, so that is the line reach is read at.
+    // On a measured period the band is a point and this is simply "has this centre got here".
+    const nReached = Math.floor(state.progressHigh * ordered.length);
+    out.push({
+      bccId,
+      reached: position < nReached,
+      alertLevel: state.alertLevel,
+      driving: false,
+      position: position + 1,
+      total: ordered.length,
+    });
+  }
+
+  // The painter's own rule, restated over the same list in the same order: the first AMBER to reach
+  // an element locks it, and failing that the last centre to reach it wins. Deriving the driver here
+  // rather than in the component is what stops a second opinion about what AMBER outranks.
+  let driver = -1;
+  for (let i = 0; i < out.length; i++) {
+    if (!out[i].reached) continue;
+    if (driver >= 0 && out[driver].alertLevel === "AMBER") break;
+    driver = i;
+  }
+  if (driver >= 0) out[driver].driving = true;
+
+  return out;
+}

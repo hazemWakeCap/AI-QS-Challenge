@@ -22,9 +22,14 @@ namespace QsEarlyWarning.Core.Forecasting;
 /// accuracy; this one cannot, and says so rather than implying otherwise.
 ///
 /// <b>What this deliberately does not do.</b> It produces no cost figure. Progress and spend are
-/// different forecasts with different error structures, and deriving EV or AC from a projected
-/// percentage would manufacture a final-cost number with none of the validation such a number needs.
-/// The spend forecast lives in <see cref="IncrementalSpendForecaster"/> and stays there.
+/// different forecasts with different error structures, and the spend forecast lives in
+/// <see cref="IncrementalSpendForecaster"/> and stays there.
+///
+/// Downstream, <see cref="EvmProjector"/> is allowed to turn these percentages into EV — that is the
+/// schema's own definition of earned value (<c>BAC × pct</c>) evaluated on a projected input, not a
+/// cost model. It is not allowed to derive AC from them, and does not: without the spend forecaster
+/// it reports AC, CPI and EAC as unavailable rather than manufacturing a final-cost number with none
+/// of the validation such a number needs. See <see cref="ProgressModels"/> for the full statement.
 /// </summary>
 public sealed class ProgressForecaster
 {

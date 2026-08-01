@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import * as FRAGS from "@thatopen/fragments";
-import type { CostCentreEvm, ZoneCost } from "../api/client";
+import type { CentreVerdict, ZoneCost } from "../api/client";
 import { colorFor, colorForCentreAlert } from "./costPaint";
 import { centresFor, worstAlert, type ElementMapIndex } from "./ifcElementMap";
 import type { SequenceFrame } from "./ifcSequence";
@@ -29,6 +29,29 @@ import { settle, type Viewer } from "./viewer";
  */
 const UNPLACED = 0xd7dce4;
 const UNPLACED_OPACITY = 0.25;
+
+/**
+ * One colour+opacity applied as a single, fully-specified highlight.
+ *
+ * <b>Never `setColor`/`setOpacity`.</b> They look like the obvious pair, and they are a trap.
+ * Fragments implements both as a highlight carrying `_explicitProps: ["color"]` /
+ * `["opacity","transparent"]`, and `getNewHighFromPast` copies every explicit prop of the PAST
+ * highlight over the new material. So one `setColor` makes that colour permanent: every later
+ * `highlight` on the element silently keeps the old colour, and the flag accumulates rather than
+ * clearing. That is what froze the take-off tab amber — the pre-sequence paint ran `setColor` over
+ * every mapped element, and from then on the sequence painter could change what was *visible* but
+ * never what colour it was, while the video tab, which never calls `setColor`, recoloured fine.
+ *
+ * A plain `highlight` with all four properties spelled out carries no explicit-prop flag, so the
+ * next one wins outright. It is also half the worker calls, which on a model this size is not
+ * nothing.
+ */
+const styleOf = (color: number, opacity: number): FRAGS.MaterialDefinition => ({
+  color: new THREE.Color(color),
+  renderedFaces: FRAGS.RenderedFaces.TWO,
+  opacity,
+  transparent: opacity < 1,
+});
 
 /** Confidence in the link between an element and the cost it is being painted with. */
 export type LinkTier = "Direct" | "Grouped";
@@ -97,13 +120,11 @@ export async function paintIfcByCost(
   }
 
   for (const { color, opacity, ids } of byStyle.values()) {
-    model.setColor(ids, new THREE.Color(color));
-    model.setOpacity(ids, opacity);
+    model.highlight(ids, styleOf(color, opacity));
   }
 
   if (ghosts.length > 0) {
-    model.setColor(ghosts, new THREE.Color(UNPLACED));
-    model.setOpacity(ghosts, UNPLACED_OPACITY);
+    model.highlight(ghosts, styleOf(UNPLACED, UNPLACED_OPACITY));
   }
 
   // The renderer draws every frame on its own; what is stale after a mutation is the model data on
@@ -135,7 +156,7 @@ export async function paintIfcByCostCentre(
   viewer: Viewer,
   model: FRAGS.FragmentsModel,
   index: ElementMapIndex,
-  centres: readonly CostCentreEvm[],
+  centres: readonly CentreVerdict[],
 ): Promise<number> {
   const byStyle = new Map<string, { color: number; opacity: number; ids: number[] }>();
   const ghosts: number[] = [...index.unmappedLocalIds];
@@ -165,13 +186,11 @@ export async function paintIfcByCostCentre(
   }
 
   for (const { color, opacity, ids } of byStyle.values()) {
-    model.setColor(ids, new THREE.Color(color));
-    model.setOpacity(ids, opacity);
+    model.highlight(ids, styleOf(color, opacity));
   }
 
   if (ghosts.length > 0) {
-    model.setColor(ghosts, new THREE.Color(UNPLACED));
-    model.setOpacity(ghosts, UNPLACED_OPACITY);
+    model.highlight(ghosts, styleOf(UNPLACED, UNPLACED_OPACITY));
   }
 
   await viewer.fragments.core.update(true);
@@ -269,6 +288,13 @@ export async function paintSequenceFrame(
   model.frozen = true;
   try {
     if (first) {
+      // The sequence owns colour from here, so it starts from a clean slate rather than inheriting
+      // whatever painted before it. Without this the tab depended on nothing else having touched the
+      // model first — a dependency that was already violated (see `styleOf`) and would be again by
+      // any future paint, with the same silent failure: geometry rising correctly in the wrong
+      // colour. One call, and only on the first frame of a run.
+      model.resetHighlight();
+
       const hidden = index.mappedLocalIds.filter((id) => !isVisible(frame, id));
       if (hidden.length > 0) model.setVisible(hidden, false);
 
@@ -331,13 +357,7 @@ function styleKeyFor(frame: SequenceFrame, localId: number): number {
 }
 
 function styleFromKey(key: number): FRAGS.MaterialDefinition {
-  const opacity = SEQUENCE_OPACITY[WEIGHTS[key & 0b11]];
-  return {
-    color: new THREE.Color(key >>> 2),
-    renderedFaces: FRAGS.RenderedFaces.TWO,
-    opacity,
-    transparent: opacity < 1,
-  };
+  return styleOf(key >>> 2, SEQUENCE_OPACITY[WEIGHTS[key & 0b11]]);
 }
 
 /** localId → style, inverted into style → localIds so each distinct style costs one call. */
@@ -351,12 +371,7 @@ function groupByStyle(byLocalId: Map<number, number>): Map<number, number[]> {
   return out;
 }
 
-const ghostStyle = (): FRAGS.MaterialDefinition => ({
-  color: new THREE.Color(UNPLACED),
-  renderedFaces: FRAGS.RenderedFaces.TWO,
-  opacity: UNPLACED_OPACITY,
-  transparent: true,
-});
+const ghostStyle = (): FRAGS.MaterialDefinition => styleOf(UNPLACED, UNPLACED_OPACITY);
 
 /** Restores every element the sequence hid, so leaving playback does not leave a half-built model. */
 export async function showAllElements(
@@ -381,8 +396,9 @@ export async function clearIfcPaint(
     ...zoneMap.unmatchedLocalIds,
   ];
   if (all.length === 0) return;
-  model.resetColor(all);
-  model.resetOpacity(all);
+  // One `resetHighlight`, not a resetColor/resetOpacity pair: colour and opacity are two properties
+  // of the same stored highlight, and dropping them individually leaves the record behind.
+  model.resetHighlight(all);
   await viewer.fragments.core.update(true);
 }
 
